@@ -1,0 +1,10 @@
+# Global IDE files
+.idea/
+.vscode/
+*.DS_Store
+thumbs.db
+
+# Node modules (untuk backend/web nanti)
+node_modules/
+dist/
+.env

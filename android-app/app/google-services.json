@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "134960743507",
+    "firebase_url": "https://testiot-d9be3-default-rtdb.firebaseio.com",
+    "project_id": "testiot-d9be3",
+    "storage_bucket": "testiot-d9be3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:134960743507:android:d2c7999804363a6f8a72a6",
+        "android_client_info": {
+          "package_name": "com.thomasalfa.photobooth"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCT0Z2npmy7a1qsEo8aoX-NKOnl50UftEo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

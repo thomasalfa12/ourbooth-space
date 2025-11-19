@@ -1,0 +1,65 @@
+[versions]
+# Gradle Plugins & Kotlin
+agp = "8.7.2"               # Versi stable solid saat ini
+kotlin = "2.0.21"           # Match dengan Compose Compiler 2.0.21
+ksp = "2.0.21-1.0.26"
+
+# Android Core
+coreKtx = "1.15.0"
+appcompat = "1.7.0"
+material = "1.12.0"
+
+# Testing
+junit = "4.13.2"
+junitVersion = "1.2.1"
+espressoCore = "3.6.1"
+
+# Compose
+# BOM menjaga semua versi library compose (ui, material3, graphics) selaras
+composeBom = "2024.10.01"   # Versi BOM Stable terbaru
+activityCompose = "1.9.3"
+navigationCompose = "2.8.3"
+lifecycleRuntimeKtx = "2.8.7"
+
+# External Libs
+usbCamera = "3.2.7"         # Library JiangDongGuo
+coil = "2.7.0"
+foundation = "1.9.4"              # Kita butuh ini untuk load image file nanti!
+
+[libraries]
+# --- Core ---
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+
+# --- Testing ---
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
+androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
+
+# --- Compose (Managed by BOM) ---
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+
+# --- Architecture Components ---
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
+androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycleRuntimeKtx" }
+
+# --- Third Party ---
+ausbc = { group = "com.github.jiangdongguo.AndroidUSBCamera", name = "libausbc", version.ref = "usbCamera" }
+coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
+androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
