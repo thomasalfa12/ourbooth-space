@@ -1,9 +1,8 @@
-package com.thomasalfa.photobooth.utils
+package com.thomasalfa.photobooth.utils.layout
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Matrix // PENTING
 import android.graphics.Rect
 
 object LayoutProcessor {
@@ -34,19 +33,11 @@ object LayoutProcessor {
         return resultBitmap
     }
 
-    // --- FUNGSI BANTUAN UNTUK FLIP (MIRROR) & RESIZE ---
-    private fun getMirroredAndScaledPhoto(original: Bitmap, targetW: Int, targetH: Int): Bitmap {
-        // 1. Buat Matrix untuk Mirror (Flip Horizontal)
-        val matrix = Matrix()
-        matrix.preScale(-1f, 1f) // -1f artinya dibalik sumbu X
-
-        // 2. Terapkan Matrix ke Bitmap Asli
-        val mirroredBitmap = Bitmap.createBitmap(
-            original, 0, 0, original.width, original.height, matrix, true
-        )
-
-        // 3. Resize agar pas ke lubang frame
-        return Bitmap.createScaledBitmap(mirroredBitmap, targetW, targetH, true)
+    // --- PERBAIKAN DISINI: HAPUS LOGIKA MATRIX/MIRROR ---
+    // Cukup resize gambar agar pas dengan lubang frame.
+    // Karena foto dari CaptureScreen SUDAH di-mirror, jadi disini jangan dibalik lagi.
+    private fun getScaledPhoto(original: Bitmap, targetW: Int, targetH: Int): Bitmap {
+        return Bitmap.createScaledBitmap(original, targetW, targetH, true)
     }
 
     // --- LOGIC TIPE A: CLASSIC GRID (2x3) ---
@@ -63,8 +54,8 @@ object LayoutProcessor {
         for (i in 0 until minOf(photos.size, 6)) {
             val (x, y) = coordinates[i]
 
-            // PANGGIL FUNGSI MIRROR DISINI
-            val finalPhoto = getMirroredAndScaledPhoto(photos[i], photoW, photoH)
+            // Panggil fungsi resize biasa (tanpa mirror)
+            val finalPhoto = getScaledPhoto(photos[i], photoW, photoH)
 
             canvas.drawBitmap(finalPhoto, x.toFloat(), y.toFloat(), null)
         }
@@ -79,8 +70,8 @@ object LayoutProcessor {
         val rightCoords = listOf(Pair(650, 300), Pair(650, 705), Pair(650, 1110))
 
         for (i in 0 until minOf(photos.size, 3)) {
-            // PANGGIL FUNGSI MIRROR DISINI
-            val finalPhoto = getMirroredAndScaledPhoto(photos[i], photoW, photoH)
+            // Panggil fungsi resize biasa (tanpa mirror)
+            val finalPhoto = getScaledPhoto(photos[i], photoW, photoH)
 
             val (lx, ly) = leftCoords[i]
             canvas.drawBitmap(finalPhoto, lx.toFloat(), ly.toFloat(), null)

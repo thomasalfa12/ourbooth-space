@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -20,30 +21,41 @@ import androidx.compose.ui.window.Dialog
 import com.thomasalfa.photobooth.data.SettingsManager
 import com.thomasalfa.photobooth.presentation.screens.admin.AdminScreen
 import com.thomasalfa.photobooth.presentation.screens.admin.FrameManagerScreen
+import com.thomasalfa.photobooth.presentation.screens.admin.SessionHistoryScreen
 import com.thomasalfa.photobooth.presentation.screens.capture.CaptureScreen
 import com.thomasalfa.photobooth.presentation.screens.home.HomeScreen
+import com.thomasalfa.photobooth.presentation.screens.result.QrCodeScreen
 import com.thomasalfa.photobooth.presentation.screens.result.ResultScreen
+import com.thomasalfa.photobooth.presentation.screens.result.UploadProgressScreen
 import com.thomasalfa.photobooth.presentation.screens.selection.SelectionScreen
 import com.thomasalfa.photobooth.ui.theme.KubikTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         setContent {
             KubikTheme {
                 val context = LocalContext.current
                 val settingsManager = remember { SettingsManager(context) }
 
-                // Navigation State
                 var currentScreen by remember { mutableStateOf("HOME") }
 
-                // Data State
+                // STATE INTRO
+                var hasPlayedIntro by rememberSaveable { mutableStateOf(false) }
+
+                // STATE DATA FOTO (Passing antar layar)
                 var capturedPhotos by remember { mutableStateOf(listOf<String>()) }
                 var selectedPhotos by remember { mutableStateOf(listOf<String>()) }
-                // 1. Tambahkan state untuk menyimpan Frame yang dipilih
-                var selectedFramePath by remember { mutableStateOf<String?>(null) }
+                var boomerangPhotos by remember { mutableStateOf(listOf<String>()) }
 
-                // PIN Dialog State
+                // STATE UPLOAD & QR (Inilah yang tadi error unresolved)
+                // Kita simpan hasil final (JPG) dan GIF disini agar bisa diakses oleh UploadScreen
+                var finalResultPath by remember { mutableStateOf<String?>(null) }
+                var finalGifPath by remember { mutableStateOf<String?>(null) }
+                var uploadedQrUrl by remember { mutableStateOf("") }
+
+                // PIN State
                 var showPinDialog by remember { mutableStateOf(false) }
                 var pinInput by remember { mutableStateOf("") }
                 val correctPin by settingsManager.adminPinFlow.collectAsState(initial = "1234")
@@ -51,13 +63,9 @@ class MainActivity : ComponentActivity() {
                 when (currentScreen) {
                     "HOME" -> {
                         HomeScreen(
-                            onStartSession = {
-                                // Reset state saat sesi baru mulai
-                                capturedPhotos = emptyList()
-                                selectedPhotos = emptyList()
-                                selectedFramePath = null
-                                currentScreen = "CAPTURE"
-                            },
+                            hasPlayedIntro = hasPlayedIntro,
+                            onIntroFinished = { hasPlayedIntro = true },
+                            onStartSession = { currentScreen = "CAPTURE" },
                             onOpenAdmin = {
                                 pinInput = ""
                                 showPinDialog = true
@@ -67,7 +75,13 @@ class MainActivity : ComponentActivity() {
                     "ADMIN" -> {
                         AdminScreen(
                             onBack = { currentScreen = "HOME" },
-                            onManageFrames = { currentScreen = "FRAME_MANAGER" }
+                            onManageFrames = { currentScreen = "FRAME_MANAGER" },
+                            onOpenHistory = { currentScreen = "SESSION_HISTORY" }
+                        )
+                    }
+                    "SESSION_HISTORY" -> {
+                        SessionHistoryScreen(
+                            onBack = { currentScreen = "ADMIN" }
                         )
                     }
                     "FRAME_MANAGER" -> {
@@ -77,8 +91,9 @@ class MainActivity : ComponentActivity() {
                     }
                     "CAPTURE" -> {
                         CaptureScreen(
-                            onSessionComplete = { photos ->
+                            onSessionComplete = { photos, booms ->
                                 capturedPhotos = photos
+                                boomerangPhotos = booms
                                 currentScreen = "SELECTION"
                             }
                         )
@@ -86,27 +101,61 @@ class MainActivity : ComponentActivity() {
                     "SELECTION" -> {
                         SelectionScreen(
                             allPhotos = capturedPhotos,
-                            onSelectionComplete = { finalPhotos ->
-                                selectedPhotos = finalPhotos
+                            onSelectionComplete = { finalSelection ->
+                                selectedPhotos = finalSelection
                                 currentScreen = "RESULT"
                             }
                         )
                     }
                     "RESULT" -> {
-                        // HAPUS parameter selectedFramePath
                         ResultScreen(
                             photoPaths = selectedPhotos,
+                            boomerangPaths = boomerangPhotos,
                             onRetake = {
                                 capturedPhotos = emptyList()
                                 selectedPhotos = emptyList()
-                                // selectedFramePath = null // Hapus baris ini juga
+                                boomerangPhotos = emptyList()
+                                currentScreen = "HOME"
+                            },
+                            // Callback saat tombol Finish ditekan
+                            onFinishClicked = { finalPath, gifPath ->
+                                finalResultPath = finalPath // Simpan path foto jadi
+                                finalGifPath = gifPath     // Simpan path GIF
+                                currentScreen = "UPLOAD_PROGRESS" // Pindah ke pesawat
+                            }
+                        )
+                    }
+
+                    "UPLOAD_PROGRESS" -> {
+                        UploadProgressScreen(
+                            photoPath = finalResultPath, // Kirim path foto jadi
+                            gifPath = finalGifPath,      // Kirim path GIF
+                            onUploadSuccess = { webLink ->
+                                uploadedQrUrl = webLink  // Simpan link website
+                                currentScreen = "QR_DISPLAY"
+                            },
+                            onUploadFailed = {
+                                Toast.makeText(context, "Upload Gagal, Cek Koneksi", Toast.LENGTH_SHORT).show()
+                                currentScreen = "RESULT" // Balik ke result
+                            }
+                        )
+                    }
+
+                    "QR_DISPLAY" -> {
+                        QrCodeScreen(
+                            url = uploadedQrUrl, // Tampilkan link website
+                            onFinish = {
+                                // Reset Total & Balik Home
+                                capturedPhotos = emptyList()
+                                selectedPhotos = emptyList()
+                                boomerangPhotos = emptyList()
                                 currentScreen = "HOME"
                             }
                         )
                     }
                 }
 
-                // --- DIALOG PIN ADMIN ---
+                // Dialog PIN
                 if (showPinDialog) {
                     Dialog(onDismissRequest = { showPinDialog = false }) {
                         Card(

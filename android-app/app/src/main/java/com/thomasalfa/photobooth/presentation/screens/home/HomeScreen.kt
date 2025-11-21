@@ -1,131 +1,146 @@
 package com.thomasalfa.photobooth.presentation.screens.home
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.airbnb.lottie.compose.*
+import com.thomasalfa.photobooth.R
 import com.thomasalfa.photobooth.presentation.components.BouncyButton
 import com.thomasalfa.photobooth.ui.theme.*
+import kotlinx.coroutines.delay
 
 @Composable
 fun HomeScreen(
+    hasPlayedIntro: Boolean, // Parameter dari MainActivity
+    onIntroFinished: () -> Unit, // Callback lapor selesai
     onStartSession: () -> Unit,
     onOpenAdmin: () -> Unit
 ) {
-    // Animasi Rotasi untuk hiasan background
-    val infiniteTransition = rememberInfiniteTransition(label = "bg")
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(20000, easing = LinearEasing)
-        ), label = "rotation"
-    )
+    // Logika Intro: Jika hasPlayedIntro false, mainkan animasi.
+    // Jika true, langsung tampilkan konten.
+
+    LaunchedEffect(Unit) {
+        if (!hasPlayedIntro) {
+            delay(3000) // Durasi Intro
+            onIntroFinished()
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(NeoCream) // Background Terang
+            .background(NeoCream) // Background Bersih
     ) {
-        // --- LAYER 1: BACKGROUND PATTERN (Polka Dot Dinamis) ---
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            drawCirclePattern(NeoPurple.copy(alpha = 0.05f), radius = 40f, spacing = 100f)
+
+        // --- KONTEN UTAMA (Muncul setelah intro atau jika sudah pernah intro) ---
+        AnimatedVisibility(
+            visible = hasPlayedIntro,
+            enter = fadeIn(animationSpec = tween(800))
+        ) {
+            MainContent(onStartSession, onOpenAdmin)
         }
 
-        // Hiasan Lingkaran Besar di pojok (Visual Interest)
-        Box(modifier = Modifier
-            .offset(x = (-100).dp, y = (-100).dp)
-            .size(400.dp)
-            .rotate(rotation) // Muter pelan
+        // --- INTRO SCREEN (Hanya muncul jika hasPlayedIntro = false) ---
+        AnimatedVisibility(
+            visible = !hasPlayedIntro,
+            exit = fadeOut(animationSpec = tween(800))
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                drawCircle(NeoYellow.copy(alpha = 0.4f), radius = size.minDimension / 2)
-                drawCircle(NeoPink.copy(alpha = 0.4f), radius = size.minDimension / 3)
+            Box(
+                modifier = Modifier.fillMaxSize().background(NeoCream), // Cover full screen
+                contentAlignment = Alignment.Center
+            ) {
+                val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.intro_animation))
+                LottieAnimation(
+                    composition = composition,
+                    iterations = 1,
+                    modifier = Modifier.size(250.dp)
+                )
             }
         }
+    }
+}
 
-        // --- LAYER 2: CONTENT ---
+@Composable
+fun MainContent(onStartSession: () -> Unit, onOpenAdmin: () -> Unit) {
+    // Animasi Denyut Halus
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val scale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.05f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = FastOutSlowInEasing), // Lebih pelan biar elegan
+            repeatMode = RepeatMode.Reverse
+        ), label = "scale"
+    )
+
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier.align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // JUDUL BESAR & FUN
-            Text(
-                text = "KUBIK",
-                style = MaterialTheme.typography.displayLarge,
-                color = NeoPurple,
-                fontWeight = FontWeight.Black,
-                fontSize = 100.sp,
-                letterSpacing = 5.sp
+            // LOGO
+            Image(
+                painter = painterResource(id = R.drawable.logo_kubik),
+                contentDescription = "Logo",
+                modifier = Modifier
+                    .width(500.dp) // Ukuran proporsional
+                    .heightIn(max = 200.dp),
+                contentScale = ContentScale.Fit
             )
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "PHOTO",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = NeoBlack,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "BOOTH",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = NeoPink, // Beda warna biar pop
-                    fontWeight = FontWeight.Bold
+            Spacer(modifier = Modifier.height(80.dp))
+
+            // TOMBOL MULAI (Style Pill Modern)
+            Box(modifier = Modifier.scale(scale)) {
+                BouncyButton(
+                    text = "TAP TO START",
+                    onClick = onStartSession,
+                    color = NeoYellow,
+                    textColor = NeoBlack,
+                    modifier = Modifier
+                        .width(280.dp)
+                        .height(75.dp)
+                        // Shadow yang lembut (Soft Shadow)
+                        .shadow(12.dp, RoundedCornerShape(50), spotColor = NeoPurple.copy(alpha=0.5f))
                 )
             }
 
-            Spacer(modifier = Modifier.height(60.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            // CALL TO ACTION (Bouncy Button Besar)
-            BouncyButton(
-                text = "TAP TO START",
-                onClick = onStartSession,
-                color = NeoYellow,
-                modifier = Modifier.width(250.dp).height(70.dp)
+            Text(
+                text = "Touch screen to begin",
+                color = Color.Gray,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 1.sp
             )
         }
 
-        // COPYRIGHT
-        Text(
-            text = "Designed for Fun Moments ✨",
-            color = Color.Gray,
-            fontSize = 14.sp,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp)
-        )
-
-        // HIDDEN ADMIN (Pojok Kanan Atas - Transparan)
+        // TOMBOL ADMIN (Hidden tapi area besar di pojok)
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .size(80.dp)
+                .size(120.dp) // Area tap besar
                 .clickable { onOpenAdmin() }
         )
-    }
-}
-
-// Helper untuk gambar pola background
-fun DrawScope.drawCirclePattern(color: Color, radius: Float, spacing: Float) {
-    var x = 0f
-    while (x < size.width) {
-        var y = 0f
-        while (y < size.height) {
-            drawCircle(color, radius, center = Offset(x, y))
-            y += spacing
-        }
-        x += spacing
     }
 }

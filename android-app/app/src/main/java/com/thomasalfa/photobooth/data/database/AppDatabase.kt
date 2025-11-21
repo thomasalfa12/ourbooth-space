@@ -5,9 +5,17 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [FrameEntity::class], version = 1)
+// Update version ke 2 karena ada perubahan struktur
+// Tambahkan SessionEntity dan SessionPhotoEntity ke daftar entities
+@Database(
+    entities = [FrameEntity::class, SessionEntity::class, SessionPhotoEntity::class],
+    version = 2, // NAIKKAN VERSI
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
+
     abstract fun frameDao(): FrameDao
+    abstract fun sessionDao(): SessionDao // Tambahkan ini
 
     companion object {
         @Volatile
@@ -19,7 +27,11 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "kubik_database"
-                ).build()
+                )
+                    // PENTING: Karena kita ubah struktur saat develop, pakai ini biar gak crash.
+                    // (Data lama akan hilang saat update aplikasi, tapi aman buat fase dev)
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }

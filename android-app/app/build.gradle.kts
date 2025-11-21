@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.ksp)
 
+    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.0"
     id("com.google.gms.google-services")
 }
 
@@ -88,6 +89,7 @@ dependencies {
 
     // Image Loading (Penting buat Photobooth)
     implementation(libs.coil.compose)
+    implementation("io.coil-kt:coil-gif:2.5.0")
 
     // Camera Library (Exclude Strategy kamu KEREN!)
     implementation(libs.ausbc) {
@@ -100,12 +102,25 @@ dependencies {
     implementation(libs.material)
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.airbnb.android:lottie-compose:6.1.0")
+    implementation(libs.androidx.compose.runtime.saveable)
+    implementation(libs.androidx.foundation)
 
     val room_version = "2.6.1"
     implementation("androidx.room:room-runtime:$room_version")
     implementation("androidx.room:room-ktx:$room_version")
     ksp("androidx.room:room-compiler:$room_version")
 
+    implementation(platform("io.github.jan-tennert.supabase:bom:3.0.0"))
+
+    // Modul (Perhatikan akhiran -kt)
+    implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.github.jan-tennert.supabase:storage-kt")
+
+    // Serializer (Wajib untuk Supabase)
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    implementation("io.ktor:ktor-client-core:3.0.0")
+    implementation("io.ktor:ktor-client-cio:3.0.0")
     // Test
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

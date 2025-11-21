@@ -9,7 +9,7 @@ val NeoYellow = Color(0xFFFFD600)     // Accent / Tombol Action
 val NeoPink = Color(0xFFFF6B81)       // Tombol Secondary / Hiasan
 val NeoBlack = Color(0xFF2D3436)      // Text (Bukan Hitam pekat, biar lembut)
 val NeoGreen = Color(0xFF2ECC71)      // Success
-
+val NeoBlue = Color(0xFF2979FF)
 // Warna UI Lama (Kubik...) bisa dihapus atau dibiarkan kalau malas refactor nama variable
 // Tapi untuk kode baru kita pakai nama variable di atas.
 val KubikBlack = NeoBlack
