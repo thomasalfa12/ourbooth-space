@@ -26,7 +26,8 @@ usbCamera = "3.2.7"         # Library JiangDongGuo
 coil = "2.7.0"
 foundation = "1.9.4"
 runtimeSaveable = "1.9.4"
-foundationVersion = "1.9.5"              # Kita butuh ini untuk load image file nanti!
+foundationVersion = "1.9.5"
+animation = "1.9.5"              # Kita butuh ini untuk load image file nanti!
 
 [libraries]
 # --- Core ---
@@ -61,6 +62,7 @@ coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
 androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }
 androidx-compose-runtime-saveable = { group = "androidx.compose.runtime", name = "runtime-saveable", version.ref = "runtimeSaveable" }
 androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundationVersion" }
+androidx-compose-animation = { group = "androidx.compose.animation", name = "animation", version.ref = "animation" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

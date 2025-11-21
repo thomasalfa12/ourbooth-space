@@ -1,15 +1,14 @@
 package com.thomasalfa.photobooth.presentation.screens.admin
 
 import android.content.Intent
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -22,10 +21,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.thomasalfa.photobooth.data.SettingsManager
+import com.thomasalfa.photobooth.data.database.AppDatabase
 import com.thomasalfa.photobooth.ui.theme.*
 import kotlinx.coroutines.launch
-import java.io.File
-import java.io.FileOutputStream
 import kotlin.math.roundToInt
 import kotlin.system.exitProcess
 
@@ -34,17 +32,29 @@ import kotlin.system.exitProcess
 fun AdminScreen(
     onBack: () -> Unit,
     onManageFrames: () -> Unit,
-    onOpenHistory: () -> Unit // <--- 1. PARAMETER BARU
+    onOpenHistory: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settingsManager = remember { SettingsManager(context) }
+    val db = remember { AppDatabase.getDatabase(context) }
 
-    // Session Config State
+    // Setting States
     var photoCount by remember { mutableIntStateOf(6) }
     var timerDuration by remember { mutableFloatStateOf(3f) }
     var captureMode by remember { mutableStateOf("AUTO") }
     var autoDelay by remember { mutableFloatStateOf(2f) }
+
+    // NEW: Active Event State
+    var activeEvent by remember { mutableStateOf("ALL") }
+    val allFrames by db.frameDao().getAllFrames().collectAsState(initial = emptyList())
+
+    // Hitung kategori yang tersedia dari frame yang sudah diupload
+    val availableEvents = remember(allFrames) {
+        val categories = allFrames.map { it.category }.distinct().filter { it != "Default" }
+        listOf("ALL", "Default Only") + categories
+    }
+    var isEventDropdownExpanded by remember { mutableStateOf(false) }
 
     // Load Data
     LaunchedEffect(Unit) {
@@ -56,51 +66,81 @@ fun AdminScreen(
     LaunchedEffect(Unit) {
         settingsManager.captureModeFlow.collect { captureMode = it }
     }
+    // Load Active Event
     LaunchedEffect(Unit) {
-        settingsManager.autoDelayFlow.collect { autoDelay = it.toFloat() }
+        settingsManager.activeEventFlow.collect { activeEvent = it }
     }
 
-    Box(
-        modifier = Modifier.fillMaxSize().background(NeoCream).padding(24.dp)
-    ) {
+    Box(modifier = Modifier.fillMaxSize().background(NeoCream).padding(24.dp)) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState()),
+            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("SESSION CONTROL", style = MaterialTheme.typography.headlineMedium, color = NeoBlack, fontWeight = FontWeight.Black)
+            Text("SESSION CONTROL", style = MaterialTheme.typography.headlineMedium, color = NeoBlack, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(24.dp))
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(4.dp),
-                modifier = Modifier.fillMaxWidth(0.9f) // Sedikit lebih lebar
+                modifier = Modifier.fillMaxWidth(0.9f)
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
 
-                    // 1. MANAGEMENT (FRAME & HISTORY)
-                    Text("1. Data Management", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Spacer(modifier = Modifier.height(12.dp))
+                    // 1. ACTIVE EVENT (FITUR BARU)
+                    Text("1. Active Event Context", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NeoPurple)
+                    Text("Select which frames appear in result screen", fontSize = 12.sp, color = Color.Gray)
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        // Tombol Frames
-                        Button(
-                            onClick = onManageFrames,
-                            colors = ButtonDefaults.buttonColors(containerColor = NeoYellow),
-                            modifier = Modifier.weight(1f).height(60.dp),
-                            shape = RoundedCornerShape(12.dp)
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = activeEvent,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Current Event") },
+                            trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
+                            modifier = Modifier.fillMaxWidth().clickable { isEventDropdownExpanded = true },
+                            enabled = false,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                disabledTextColor = Color.Black,
+                                disabledBorderColor = NeoPurple,
+                                disabledLabelColor = NeoPurple
+                            )
+                        )
+                        Surface(
+                            modifier = Modifier.matchParentSize().clickable { isEventDropdownExpanded = true },
+                            color = Color.Transparent
+                        ) {}
+
+                        DropdownMenu(
+                            expanded = isEventDropdownExpanded,
+                            onDismissRequest = { isEventDropdownExpanded = false }
                         ) {
-                            Text("FRAMES", color = NeoBlack, fontWeight = FontWeight.Bold)
+                            availableEvents.forEach { event ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(event, fontWeight = FontWeight.Bold)
+                                            if(event == "ALL") Text("Show Default + All Custom", fontSize=10.sp, color=Color.Gray)
+                                            else if(event == "Default Only") Text("Show Default frames only", fontSize=10.sp, color=Color.Gray)
+                                            else Text("Show Default + $event frames", fontSize=10.sp, color=Color.Gray)
+                                        }
+                                    },
+                                    onClick = { activeEvent = event; isEventDropdownExpanded = false }
+                                )
+                            }
                         }
+                    }
 
-                        // Tombol History (BARU)
-                        Button(
-                            onClick = onOpenHistory,
-                            colors = ButtonDefaults.buttonColors(containerColor = NeoBlue),
-                            modifier = Modifier.weight(1f).height(60.dp),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
+                    Divider(modifier = Modifier.padding(vertical = 24.dp))
+
+                    // 2. MANAGEMENT
+                    Text("2. Data Management", fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(onClick = onManageFrames, colors = ButtonDefaults.buttonColors(containerColor = NeoYellow), modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(8.dp)) {
+                            Text("FRAMES LIBRARY", color = NeoBlack, fontWeight = FontWeight.Bold)
+                        }
+                        Button(onClick = onOpenHistory, colors = ButtonDefaults.buttonColors(containerColor = NeoBlue), modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(8.dp)) {
                             Icon(Icons.Default.DateRange, null, tint = Color.White)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("HISTORY", color = Color.White, fontWeight = FontWeight.Bold)
@@ -109,62 +149,43 @@ fun AdminScreen(
 
                     Divider(modifier = Modifier.padding(vertical = 24.dp))
 
-                    // 2. JUMLAH FOTO
-                    Text("2. Total Shots", fontWeight = FontWeight.Bold)
+                    // 3. SETTINGS LAINNYA (Sama seperti sebelumnya)
+                    Text("3. Photo Count", fontWeight = FontWeight.Bold)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         listOf(6, 8, 10).forEach { count ->
                             FilterChip(
                                 selected = photoCount == count,
                                 onClick = { photoCount = count },
-                                label = { Text("$count Shots") },
-                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NeoPurple, selectedLabelColor = Color.White)
+                                label = { Text("$count Shots") }
                             )
                         }
                     }
 
-                    Divider(modifier = Modifier.padding(vertical = 16.dp))
-
-                    // 3. MODE CAPTURE
-                    Text("3. Capture Mode", fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("4. Capture Mode", fontWeight = FontWeight.Bold)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(selected = captureMode == "AUTO", onClick = { captureMode = "AUTO" })
-                        Text("Auto Loop (Otomatis)")
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Auto Loop")
+                        Spacer(modifier = Modifier.width(16.dp))
                         RadioButton(selected = captureMode == "MANUAL", onClick = { captureMode = "MANUAL" })
-                        Text("Manual (Klik per foto)")
+                        Text("Manual Tap")
                     }
 
-                    Divider(modifier = Modifier.padding(vertical = 16.dp))
-
-                    // 4. TIMINGS
-                    Text("4. Timings", fontWeight = FontWeight.Bold)
-                    Text("Countdown: ${timerDuration.roundToInt()} sec", fontSize = 12.sp, color = Color.Gray)
-                    Slider(
-                        value = timerDuration, onValueChange = { timerDuration = it },
-                        valueRange = 3f..10f, steps = 6,
-                        colors = SliderDefaults.colors(thumbColor = NeoPurple, activeTrackColor = NeoPurple)
-                    )
-
-                    if (captureMode == "AUTO") {
-                        Text("Delay between shots: ${autoDelay.roundToInt()} sec", fontSize = 12.sp, color = Color.Gray)
-                        Slider(
-                            value = autoDelay, onValueChange = { autoDelay = it },
-                            valueRange = 2f..10f, steps = 7,
-                            colors = SliderDefaults.colors(thumbColor = NeoPink, activeTrackColor = NeoPink)
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("5. Countdown: ${timerDuration.roundToInt()}s", fontWeight = FontWeight.Bold)
+                    Slider(value = timerDuration, onValueChange = { timerDuration = it }, valueRange = 3f..10f, steps = 6)
                 }
             }
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // TOMBOL SAVE (Hijau)
+            // TOMBOL SAVE
             Button(
                 onClick = {
                     scope.launch {
+                        // SIMPAN SEMUA SETTING TERMASUK ACTIVE EVENT
                         settingsManager.saveSessionSettings(photoCount, timerDuration.roundToInt(), captureMode, autoDelay.roundToInt())
+                        settingsManager.saveActiveEvent(activeEvent) // <-- SIMPAN EVENT
                         onBack()
                     }
                 },
@@ -172,22 +193,13 @@ fun AdminScreen(
                 modifier = Modifier.height(60.dp).fillMaxWidth(0.8f),
                 shape = RoundedCornerShape(16.dp)
             ) {
-                Text("SAVE & BACK TO HOME", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("SAVE & APPLY", fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
 
             Spacer(modifier = Modifier.height(32.dp))
-
-            Divider()
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // TOMBOL EMERGENCY RESTART (Merah)
-            // Ini fitur penting untuk Kiosk Mode jika kamera macet
-            Text("SYSTEM MAINTENANCE", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
-
+            // Tombol Restart (Sama seperti sebelumnya, boleh dipaste lagi)
             Button(
                 onClick = {
-                    // Logic Restart App
                     val packageManager = context.packageManager
                     val intent = packageManager.getLaunchIntentForPackage(context.packageName)
                     val componentName = intent?.component
@@ -204,7 +216,7 @@ fun AdminScreen(
                 Text("FORCE RESTART APP", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
 
-            Spacer(modifier = Modifier.height(50.dp)) // Jarak bawah
+            Spacer(modifier = Modifier.height(50.dp))
         }
     }
 }

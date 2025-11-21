@@ -18,70 +18,55 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.UUID
 
 @Composable
 fun UploadProgressScreen(
     photoPath: String?,
-    gifPath: String?,
-    onUploadSuccess: (String) -> Unit, // String ini adalah Link Website untuk QR
+    sessionUuid: String,
+    isBackgroundUploadDone: Boolean,
+    backgroundError: String?,
+    onUploadSuccess: (String) -> Unit,
     onUploadFailed: () -> Unit
 ) {
-    // Animasi Pesawat
     val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.paper_plane))
-    var statusText by remember { mutableStateOf("Connecting to Cloud...") }
+    var statusText by remember { mutableStateOf("Finalizing...") }
 
     LaunchedEffect(Unit) {
-        delay(1000) // Animasi intro sebentar
+        delay(500)
 
-        if (photoPath == null) {
-            onUploadFailed()
-            return@LaunchedEffect
-        }
+        if (photoPath == null) { onUploadFailed(); return@LaunchedEffect }
 
         withContext(Dispatchers.IO) {
             try {
-                // 1. UPLOAD FOTO
-                statusText = "Uploading Photo..."
-                val photoFile = File(photoPath)
-                val photoUrl = SupabaseManager.uploadFile(photoFile)
-
-                if (photoUrl == null) throw Exception("Gagal upload foto")
-
-                // 2. UPLOAD GIF (Jika Ada)
-                var gifUrl: String? = null
-                if (gifPath != null) {
-                    statusText = "Uploading Live Photo..."
-                    val gifFile = File(gifPath)
-                    gifUrl = SupabaseManager.uploadFile(gifFile)
+                // 1. CEK STATUS BACKGROUND (Tunggu GIF & DB Init Selesai)
+                while (!isBackgroundUploadDone) {
+                    withContext(Dispatchers.Main) { statusText = "Syncing data..." }
+                    delay(200) // Cek setiap 0.2 detik
                 }
 
-                // 3. SIMPAN KE DATABASE (SESSION)
-                statusText = "Finalizing Session..."
+                // Jika background error, lempar exception
+                if (backgroundError != null) {
+                    throw Exception("Background Error: $backgroundError")
+                }
 
-                // Generate ID Unik untuk Web
-                val sessionUuid = UUID.randomUUID().toString()
+                // 2. UPLOAD FOTO FINAL (Hanya ini yang ditunggu User)
+                withContext(Dispatchers.Main) { statusText = "Uploading Photo..." }
+                val photoFile = File(photoPath)
+                val finalPhotoUrl = SupabaseManager.uploadFile(photoFile) ?: throw Exception("Upload Foto Gagal")
 
-                val dbSuccess = SupabaseManager.insertSession(
-                    uuid = sessionUuid,
-                    photoUrl = photoUrl,
-                    gifUrl = gifUrl
-                )
+                // 3. UPDATE DATABASE (Patch data terakhir)
+                withContext(Dispatchers.Main) { statusText = "Finishing up..." }
+                val updateSuccess = SupabaseManager.updateFinalSession(sessionUuid, finalPhotoUrl)
 
-                if (dbSuccess) {
+                if (updateSuccess) {
                     withContext(Dispatchers.Main) {
-                        statusText = "Sent!"
+                        statusText = "Done!"
                         delay(500)
-
-                        // --- INI KUNCINYA ---
-                        // Link yang dikirim ke QR Code bukan link file JPG,
-                        // tapi link WEBSITE Anda dengan parameter ID.
-                        val webLink = "https://kubik-gallery.vercel.app/?id=$sessionUuid"
-
+                        val webLink = "https://ourbooth-space.vercel.app/?id=$sessionUuid"
                         onUploadSuccess(webLink)
                     }
                 } else {
-                    throw Exception("Gagal simpan database")
+                    throw Exception("Gagal Update Database")
                 }
 
             } catch (e: Exception) {
@@ -93,7 +78,6 @@ fun UploadProgressScreen(
         }
     }
 
-    // UI
     Box(
         modifier = Modifier.fillMaxSize().background(NeoCream),
         contentAlignment = Alignment.Center

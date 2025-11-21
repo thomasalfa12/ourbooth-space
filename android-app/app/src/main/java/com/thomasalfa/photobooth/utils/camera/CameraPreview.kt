@@ -2,7 +2,7 @@ package com.thomasalfa.photobooth.utils.camera
 
 import android.graphics.SurfaceTexture
 import android.view.TextureView
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
@@ -12,17 +12,17 @@ import com.jiangdg.ausbc.widget.IAspectRatio
 
 @Composable
 fun CameraPreview(
-    modifier: Modifier = Modifier,
+    modifier: Modifier = Modifier, // Biarkan modifier dari luar bekerja (seperti fillMaxSize)
     cameraClient: CameraClient?,
     onViewCreated: (IAspectRatio) -> Unit
 ) {
     AndroidView(
-        // Pastikan rasio container UI sesuai dengan request kamera (4:3)
-        modifier = modifier.aspectRatio(4f / 3f),
+        // [FIX] Hapus .aspectRatio(4f/3f) di sini agar tidak konflik dengan parent.
+        // AspectRatioTextureView akan otomatis menyesuaikan kontennya (fitting)
+        modifier = modifier,
         factory = { context ->
             AspectRatioTextureView(context).apply {
                 // --- FITUR MIRRORING ---
-                // Membalik view secara horizontal (Kiri jadi Kanan)
                 this.scaleX = -1f
                 // -----------------------
 

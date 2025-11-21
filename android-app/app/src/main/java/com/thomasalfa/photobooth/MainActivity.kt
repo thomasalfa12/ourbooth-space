@@ -29,6 +29,12 @@ import com.thomasalfa.photobooth.presentation.screens.result.ResultScreen
 import com.thomasalfa.photobooth.presentation.screens.result.UploadProgressScreen
 import com.thomasalfa.photobooth.presentation.screens.selection.SelectionScreen
 import com.thomasalfa.photobooth.ui.theme.KubikTheme
+import com.thomasalfa.photobooth.utils.GifProcessor
+import com.thomasalfa.photobooth.utils.SupabaseManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.io.File
+import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,22 +43,26 @@ class MainActivity : ComponentActivity() {
         setContent {
             KubikTheme {
                 val context = LocalContext.current
+                val scope = rememberCoroutineScope()
                 val settingsManager = remember { SettingsManager(context) }
 
                 var currentScreen by remember { mutableStateOf("HOME") }
 
-                // STATE INTRO
+                // --- FIX: KEMBALIKAN STATE INTRO ---
                 var hasPlayedIntro by rememberSaveable { mutableStateOf(false) }
 
-                // STATE DATA FOTO (Passing antar layar)
+                // STATE DATA FOTO
                 var capturedPhotos by remember { mutableStateOf(listOf<String>()) }
                 var selectedPhotos by remember { mutableStateOf(listOf<String>()) }
                 var boomerangPhotos by remember { mutableStateOf(listOf<String>()) }
 
-                // STATE UPLOAD & QR (Inilah yang tadi error unresolved)
-                // Kita simpan hasil final (JPG) dan GIF disini agar bisa diakses oleh UploadScreen
+                // STATE BACKGROUND UPLOAD
+                var currentSessionUuid by remember { mutableStateOf("") }
+                var isBackgroundUploadDone by remember { mutableStateOf(false) }
+                var backgroundUploadError by remember { mutableStateOf<String?>(null) }
+
+                // State Final Result
                 var finalResultPath by remember { mutableStateOf<String?>(null) }
-                var finalGifPath by remember { mutableStateOf<String?>(null) }
                 var uploadedQrUrl by remember { mutableStateOf("") }
 
                 // PIN State
@@ -62,14 +72,21 @@ class MainActivity : ComponentActivity() {
 
                 when (currentScreen) {
                     "HOME" -> {
+                        // --- FIX: PASSING PARAMETER INTRO ---
                         HomeScreen(
                             hasPlayedIntro = hasPlayedIntro,
                             onIntroFinished = { hasPlayedIntro = true },
-                            onStartSession = { currentScreen = "CAPTURE" },
-                            onOpenAdmin = {
-                                pinInput = ""
-                                showPinDialog = true
-                            }
+                            onStartSession = {
+                                // Reset Semua State Session
+                                capturedPhotos = emptyList()
+                                selectedPhotos = emptyList()
+                                boomerangPhotos = emptyList()
+                                currentSessionUuid = ""
+                                isBackgroundUploadDone = false
+                                backgroundUploadError = null
+                                currentScreen = "CAPTURE"
+                            },
+                            onOpenAdmin = { pinInput = ""; showPinDialog = true }
                         )
                     }
                     "ADMIN" -> {
@@ -79,16 +96,9 @@ class MainActivity : ComponentActivity() {
                             onOpenHistory = { currentScreen = "SESSION_HISTORY" }
                         )
                     }
-                    "SESSION_HISTORY" -> {
-                        SessionHistoryScreen(
-                            onBack = { currentScreen = "ADMIN" }
-                        )
-                    }
-                    "FRAME_MANAGER" -> {
-                        FrameManagerScreen(
-                            onBack = { currentScreen = "ADMIN" }
-                        )
-                    }
+                    "SESSION_HISTORY" -> { SessionHistoryScreen(onBack = { currentScreen = "ADMIN" }) }
+                    "FRAME_MANAGER" -> { FrameManagerScreen(onBack = { currentScreen = "ADMIN" }) }
+
                     "CAPTURE" -> {
                         CaptureScreen(
                             onSessionComplete = { photos, booms ->
@@ -98,59 +108,86 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
+
                     "SELECTION" -> {
                         SelectionScreen(
                             allPhotos = capturedPhotos,
                             onSelectionComplete = { finalSelection ->
                                 selectedPhotos = finalSelection
+
+                                // --- BACKGROUND PROCESS (VERSI RINGAN) ---
+                                val newUuid = UUID.randomUUID().toString()
+                                currentSessionUuid = newUuid
+                                isBackgroundUploadDone = false
+                                backgroundUploadError = null
+
+                                scope.launch(Dispatchers.IO) {
+                                    try {
+                                        // 1. Upload GIF (Jika ada)
+                                        var gifUrl: String? = null
+                                        if (boomerangPhotos.isNotEmpty()) {
+                                            val gifPath = GifProcessor.generateBoomerangGif(context, boomerangPhotos)
+                                            gifUrl = SupabaseManager.uploadFile(File(gifPath))
+                                        }
+
+                                        // 2. Insert DB Awal (Cuma UUID + GIF)
+                                        // Foto mentah GAK USAH diupload
+                                        val success = SupabaseManager.insertInitialSession(
+                                            uuid = newUuid,
+                                            gifUrl = gifUrl
+                                        )
+
+                                        if (!success) throw Exception("Gagal inisialisasi Database")
+                                        isBackgroundUploadDone = true
+
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                        backgroundUploadError = e.message
+                                        isBackgroundUploadDone = true
+                                    }
+                                }
+
                                 currentScreen = "RESULT"
                             }
                         )
                     }
+
                     "RESULT" -> {
                         ResultScreen(
                             photoPaths = selectedPhotos,
                             boomerangPaths = boomerangPhotos,
                             onRetake = {
-                                capturedPhotos = emptyList()
-                                selectedPhotos = emptyList()
-                                boomerangPhotos = emptyList()
+                                capturedPhotos = emptyList(); selectedPhotos = emptyList()
                                 currentScreen = "HOME"
                             },
-                            // Callback saat tombol Finish ditekan
-                            onFinishClicked = { finalPath, gifPath ->
-                                finalResultPath = finalPath // Simpan path foto jadi
-                                finalGifPath = gifPath     // Simpan path GIF
-                                currentScreen = "UPLOAD_PROGRESS" // Pindah ke pesawat
+                            onFinishClicked = { finalPath, _ ->
+                                finalResultPath = finalPath
+                                currentScreen = "UPLOAD_PROGRESS"
                             }
                         )
                     }
 
                     "UPLOAD_PROGRESS" -> {
                         UploadProgressScreen(
-                            photoPath = finalResultPath, // Kirim path foto jadi
-                            gifPath = finalGifPath,      // Kirim path GIF
+                            photoPath = finalResultPath,
+                            sessionUuid = currentSessionUuid,
+                            isBackgroundUploadDone = isBackgroundUploadDone,
+                            backgroundError = backgroundUploadError,
                             onUploadSuccess = { webLink ->
-                                uploadedQrUrl = webLink  // Simpan link website
+                                uploadedQrUrl = webLink
                                 currentScreen = "QR_DISPLAY"
                             },
                             onUploadFailed = {
-                                Toast.makeText(context, "Upload Gagal, Cek Koneksi", Toast.LENGTH_SHORT).show()
-                                currentScreen = "RESULT" // Balik ke result
+                                Toast.makeText(context, "Upload Gagal", Toast.LENGTH_SHORT).show()
+                                currentScreen = "RESULT"
                             }
                         )
                     }
 
                     "QR_DISPLAY" -> {
                         QrCodeScreen(
-                            url = uploadedQrUrl, // Tampilkan link website
-                            onFinish = {
-                                // Reset Total & Balik Home
-                                capturedPhotos = emptyList()
-                                selectedPhotos = emptyList()
-                                boomerangPhotos = emptyList()
-                                currentScreen = "HOME"
-                            }
+                            url = uploadedQrUrl,
+                            onFinish = { currentScreen = "HOME" }
                         )
                     }
                 }
@@ -169,7 +206,6 @@ class MainActivity : ComponentActivity() {
                             ) {
                                 Text("Admin Access", style = MaterialTheme.typography.titleLarge)
                                 Spacer(modifier = Modifier.height(16.dp))
-
                                 OutlinedTextField(
                                     value = pinInput,
                                     onValueChange = { if (it.length <= 4) pinInput = it },
@@ -178,19 +214,13 @@ class MainActivity : ComponentActivity() {
                                     visualTransformation = PasswordVisualTransformation(),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                                 )
-
                                 Spacer(modifier = Modifier.height(24.dp))
-
                                 Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                                     TextButton(onClick = { showPinDialog = false }) { Text("Cancel") }
                                     Button(
                                         onClick = {
-                                            if (pinInput == correctPin) {
-                                                showPinDialog = false
-                                                currentScreen = "ADMIN"
-                                            } else {
-                                                Toast.makeText(context, "Wrong PIN!", Toast.LENGTH_SHORT).show()
-                                            }
+                                            if (pinInput == correctPin) { showPinDialog = false; currentScreen = "ADMIN" }
+                                            else { Toast.makeText(context, "Wrong PIN!", Toast.LENGTH_SHORT).show() }
                                         }
                                     ) { Text("Enter") }
                                 }

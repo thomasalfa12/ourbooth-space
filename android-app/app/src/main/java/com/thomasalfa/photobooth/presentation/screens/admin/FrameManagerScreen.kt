@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,20 +26,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager // IMPORT PENTING 1
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.material.icons.filled.ArrowDropDown
 import coil.compose.rememberAsyncImagePainter
 import com.thomasalfa.photobooth.data.database.AppDatabase
 import com.thomasalfa.photobooth.data.database.FrameEntity
 import com.thomasalfa.photobooth.ui.theme.*
-import kotlinx.coroutines.Dispatchers // IMPORT PENTING 2
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext // IMPORT PENTING 3
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
@@ -49,20 +49,14 @@ fun FrameManagerScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-
-    // Init Database
     val db = remember { AppDatabase.getDatabase(context) }
     val framesList by db.frameDao().getAllFrames().collectAsState(initial = emptyList())
 
-    // State Dialog & Loading
     var showAddDialog by remember { mutableStateOf(false) }
-    var isSaving by remember { mutableStateOf(false) } // State untuk Loading
+    var isSaving by remember { mutableStateOf(false) }
 
-    Box(
-        modifier = Modifier.fillMaxSize().background(NeoCream).padding(24.dp)
-    ) {
+    Box(modifier = Modifier.fillMaxSize().background(NeoCream).padding(24.dp)) {
         Column {
-            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -76,16 +70,12 @@ fun FrameManagerScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // List Frame
             if (framesList.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
                     Text("No frames yet. Add one!", color = Color.Gray)
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(framesList) { frame ->
                         FrameItemCard(frame, onDelete = {
                             scope.launch(Dispatchers.IO) { db.frameDao().deleteFrame(frame) }
@@ -96,7 +86,6 @@ fun FrameManagerScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Tombol Add Besar
             Button(
                 onClick = { showAddDialog = true },
                 colors = ButtonDefaults.buttonColors(containerColor = NeoPurple),
@@ -109,25 +98,23 @@ fun FrameManagerScreen(
             }
         }
 
-        // --- LOGIC SIMPAN DATA DI SINI ---
         if (showAddDialog) {
+            // Ambil daftar kategori unik yang sudah ada di database untuk saran dropdown
+            val existingCategories = framesList.map { it.category }.distinct().filter { it != "Default" }
+
             AddFrameDialog(
                 isLoading = isSaving,
+                existingCategories = existingCategories,
                 onDismiss = { if (!isSaving) showAddDialog = false },
                 onSave = { name, category, layout, uri ->
-                    isSaving = true // Mulai Loading
-
+                    isSaving = true
                     scope.launch {
                         try {
-                            // 1. Pindah ke IO Thread (Background) agar UI tidak Freeze
                             withContext(Dispatchers.IO) {
                                 val inputStream = context.contentResolver.openInputStream(uri)
                                 val fileName = "frame_${System.currentTimeMillis()}.png"
                                 val file = File(context.filesDir, fileName)
-
-                                inputStream?.use { input ->
-                                    FileOutputStream(file).use { output -> input.copyTo(output) }
-                                }
+                                inputStream?.use { input -> FileOutputStream(file).use { output -> input.copyTo(output) } }
 
                                 val newFrame = FrameEntity(
                                     displayName = name,
@@ -137,14 +124,12 @@ fun FrameManagerScreen(
                                 )
                                 db.frameDao().insertFrame(newFrame)
                             }
-
-                            // 2. Kembali ke Main Thread setelah selesai
                             Toast.makeText(context, "Frame Saved!", Toast.LENGTH_SHORT).show()
                             showAddDialog = false
                         } catch (e: Exception) {
                             Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                         } finally {
-                            isSaving = false // Stop Loading
+                            isSaving = false
                         }
                     }
                 }
@@ -153,7 +138,6 @@ fun FrameManagerScreen(
     }
 }
 
-// --- KOMPONEN CARD FRAME ---
 @Composable
 fun FrameItemCard(frame: FrameEntity, onDelete: () -> Unit) {
     Card(
@@ -161,53 +145,30 @@ fun FrameItemCard(frame: FrameEntity, onDelete: () -> Unit) {
         elevation = CardDefaults.cardElevation(2.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Thumbnail Gambar
+        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Image(
-                painter = rememberAsyncImagePainter(File(frame.imagePath)),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(60.dp, 90.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .border(1.dp, Color.LightGray, RoundedCornerShape(8.dp))
-                    .background(Color.LightGray),
-                contentScale = ContentScale.Fit
+                painter = rememberAsyncImagePainter(File(frame.imagePath)), contentDescription = null,
+                modifier = Modifier.size(60.dp, 90.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, Color.LightGray, RoundedCornerShape(8.dp)).background(Color.LightGray), contentScale = ContentScale.Fit
             )
-
             Spacer(modifier = Modifier.width(16.dp))
-
             Column(modifier = Modifier.weight(1f)) {
                 Text(frame.displayName, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 Row {
                     Badge(frame.layoutType, NeoYellow)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Badge(frame.category, NeoPink)
+                    // Warna badge beda untuk Default vs Custom
+                    Badge(frame.category, if(frame.category == "Default") Color.LightGray else NeoPink)
                 }
             }
-
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red)
-            }
+            IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red) }
         }
     }
 }
 
 @Composable
 fun Badge(text: String, color: Color) {
-    Surface(
-        color = color.copy(alpha = 0.2f),
-        shape = RoundedCornerShape(4.dp)
-    ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.Black
-        )
+    Surface(color = color.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+        Text(text = text, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
     }
 }
 
@@ -215,126 +176,73 @@ fun Badge(text: String, color: Color) {
 @Composable
 fun AddFrameDialog(
     isLoading: Boolean,
+    existingCategories: List<String>,
     onDismiss: () -> Unit,
     onSave: (String, String, String, Uri) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
 
-    // --- LOGIC DROPDOWN KATEGORI ---
-    val categories = listOf("Wedding", "Birthday", "Graduation", "Casual", "Event", "Other")
-    var category by remember { mutableStateOf(categories[0]) }
+    // --- LOGIC KATEGORI BARU ---
+    // Bisa pilih "Default" atau ketik custom category
+    var categoryInput by remember { mutableStateOf("Default") }
     var isCategoryExpanded by remember { mutableStateOf(false) }
+    val defaultOptions = listOf("Default") + existingCategories
 
     var selectedLayout by remember { mutableStateOf("GRID") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
 
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        selectedImageUri = uri
-    }
-
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { selectedImageUri = it }
     val focusManager = LocalFocusManager.current
 
     Dialog(onDismissRequest = onDismiss) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.padding(16.dp)
-        ) {
+        Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(16.dp), modifier = Modifier.padding(16.dp)) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text("Upload New Frame", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 1. Nama Frame
                 OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Frame Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() })
+                    value = name, onValueChange = { name = it }, label = { Text("Frame Name") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() })
                 )
-
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // 2. Kategori (DROPDOWN MENU)
+                // CATEGORY INPUT (Editable Dropdown)
                 Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
-                        value = category,
-                        onValueChange = {},
-                        readOnly = true, // Tidak bisa diketik manual
-                        label = { Text("Category") },
-                        trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                            disabledBorderColor = MaterialTheme.colorScheme.outline,
-                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        value = categoryInput,
+                        onValueChange = { categoryInput = it }, // User bisa ketik manual
+                        label = { Text("Event Category (e.g. Wedding A)") },
+                        trailingIcon = { IconButton(onClick = { isCategoryExpanded = true }) { Icon(Icons.Default.ArrowDropDown, null) } },
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    // Invisible button agar bisa diklik seluruh area-nya
-                    Surface(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .padding(top = 8.dp)
-                            .clickable { isCategoryExpanded = true },
-                        color = Color.Transparent
-                    ) {}
-
-                    DropdownMenu(
-                        expanded = isCategoryExpanded,
-                        onDismissRequest = { isCategoryExpanded = false }
-                    ) {
-                        categories.forEach { cat ->
-                            DropdownMenuItem(
-                                text = { Text(cat) },
-                                onClick = {
-                                    category = cat
-                                    isCategoryExpanded = false
-                                }
-                            )
+                    DropdownMenu(expanded = isCategoryExpanded, onDismissRequest = { isCategoryExpanded = false }) {
+                        defaultOptions.forEach { cat ->
+                            DropdownMenuItem(text = { Text(cat) }, onClick = { categoryInput = cat; isCategoryExpanded = false })
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-
-                // 3. Layout Type
                 Text("Layout Type:", fontWeight = FontWeight.Bold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = selectedLayout == "GRID", onClick = { selectedLayout = "GRID" })
-                    Text("Grid (2x3)")
+                    Text("Grid")
                     Spacer(modifier = Modifier.width(16.dp))
                     RadioButton(selected = selectedLayout == "STRIP", onClick = { selectedLayout = "STRIP" })
-                    Text("Strip (Cut 2)")
+                    Text("Strip")
                 }
-
                 Spacer(modifier = Modifier.height(12.dp))
-
-                // 4. Image Picker
-                Button(
-                    onClick = { launcher.launch("image/png") },
-                    colors = ButtonDefaults.buttonColors(containerColor = if(selectedImageUri != null) NeoGreen else NeoYellow),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                Button(onClick = { launcher.launch("image/png") }, colors = ButtonDefaults.buttonColors(containerColor = if(selectedImageUri != null) NeoGreen else NeoYellow), modifier = Modifier.fillMaxWidth()) {
                     Text(if (selectedImageUri != null) "IMAGE SELECTED ✅" else "SELECT PNG IMAGE", color = NeoBlack)
                 }
-
                 Spacer(modifier = Modifier.height(24.dp))
-
-                // Action Buttons
                 Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                     TextButton(onClick = onDismiss, enabled = !isLoading) { Text("Cancel") }
                     Button(
-                        onClick = {
-                            if (name.isNotEmpty() && selectedImageUri != null) {
-                                onSave(name, category, selectedLayout, selectedImageUri!!)
-                            }
-                        },
+                        onClick = { if (name.isNotEmpty() && selectedImageUri != null) onSave(name, categoryInput, selectedLayout, selectedImageUri!!) },
                         enabled = !isLoading && name.isNotEmpty() && selectedImageUri != null
                     ) {
-                        if (isLoading) CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
-                        else Text("Save Frame")
+                        if (isLoading) CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White) else Text("Save Frame")
                     }
                 }
             }

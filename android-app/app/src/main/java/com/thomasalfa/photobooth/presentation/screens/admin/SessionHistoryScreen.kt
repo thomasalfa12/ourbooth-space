@@ -99,58 +99,67 @@ fun SessionHistoryScreen(
         val printManager = context.getSystemService(Context.PRINT_SERVICE) as PrintManager
         val jobName = "KubikReprint"
 
-        // PERBAIKAN DISINI: Menggunakan Konstanta yang benar
         val attributes = android.print.PrintAttributes.Builder()
             .setMediaSize(android.print.PrintAttributes.MediaSize.NA_INDEX_4X6)
             .setResolution(android.print.PrintAttributes.Resolution("id", "print", 300, 300))
-            .setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR) // FIX ERROR
+            .setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR)
             .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
             .build()
 
         printManager.print(jobName, PhotoPrintAdapter(context, bitmap, jobName), attributes)
     }
 
-    // GENERATE QR (UPLOAD KE CLOUD)
-    fun handleGenerateQr(session: SessionWithPhotos) {
-        val finalPath = session.session.finalGridPath ?: return
-        val gifPath = session.session.gifPath
-        val uuid = session.session.sessionUuid
+    // GENERATE QR (RE-UPLOAD KE CLOUD)
+    fun handleGenerateQr(sessionData: SessionWithPhotos) {
+        val finalPath = sessionData.session.finalGridPath ?: return
+        val gifPath = sessionData.session.gifPath
+        val uuid = sessionData.session.sessionUuid
+        // val rawPhotosList = sessionData.photos <-- GAK PERLU LAGI
 
         scope.launch {
             isUploading = true
 
-            // 1. Upload Ulang File (Jika file masih ada di lokal)
-            val photoUrl = withContext(Dispatchers.IO) {
-                if (File(finalPath).exists()) SupabaseManager.uploadFile(File(finalPath)) else null
-            }
-
-            var gifUrl: String? = null
-            if (gifPath != null && File(gifPath).exists()) {
-                withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
+                // 1. Upload GIF (Jika ada)
+                var gifUrl: String? = null
+                if (gifPath != null && File(gifPath).exists()) {
                     gifUrl = SupabaseManager.uploadFile(File(gifPath))
                 }
-            }
 
-            // 2. Update/Insert Database Cloud
-            if (photoUrl != null) {
-                SupabaseManager.insertSession(uuid, photoUrl, gifUrl)
+                // 2. Upload Final Photo
+                val photoUrl = if (File(finalPath).exists()) SupabaseManager.uploadFile(File(finalPath)) else null
 
-                // 3. Generate Link Website
-                val webLink = "https://kubik-gallery.vercel.app/?id=$uuid"
+                // 3. Update Database
+                if (photoUrl != null) {
+                    // A. Insert Awal (UUID + GIF saja)
+                    SupabaseManager.insertInitialSession(uuid, gifUrl)
 
-                // 4. Generate QR Image
-                val bmp = LocalShareManager.generateQrCode(webLink)
+                    // B. Update Final (Foto Jadi)
+                    val updateSuccess = SupabaseManager.updateFinalSession(uuid, photoUrl)
 
-                qrBitmap = bmp
-                isUploading = false
-                showQrDialog = true
-            } else {
-                isUploading = false
-                Toast.makeText(context, "Upload Gagal (File Hilang/No Internet)", Toast.LENGTH_SHORT).show()
+                    if (updateSuccess) {
+                        val webLink = "https://ourbooth-space.vercel.app/?id=$uuid"
+                        val bmp = LocalShareManager.generateQrCode(webLink)
+                        withContext(Dispatchers.Main) {
+                            qrBitmap = bmp
+                            isUploading = false
+                            showQrDialog = true
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            isUploading = false
+                            Toast.makeText(context, "Gagal Update Database", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        isUploading = false
+                        Toast.makeText(context, "File Final Tidak Ditemukan", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
     }
-
     // --- UI ---
     Box(modifier = Modifier.fillMaxSize().background(NeoCream).padding(24.dp)) {
         Column {

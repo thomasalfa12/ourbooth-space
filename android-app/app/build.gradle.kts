@@ -105,6 +105,7 @@ dependencies {
     implementation("com.airbnb.android:lottie-compose:6.1.0")
     implementation(libs.androidx.compose.runtime.saveable)
     implementation(libs.androidx.foundation)
+    implementation(libs.androidx.compose.animation)
 
     val room_version = "2.6.1"
     implementation("androidx.room:room-runtime:$room_version")

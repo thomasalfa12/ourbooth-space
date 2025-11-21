@@ -31,17 +31,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage // Ganti ke Subcompose untuk handling error lebih baik
 import coil.request.ImageRequest
 import com.jiangdg.ausbc.CameraClient
 import com.jiangdg.ausbc.camera.CameraUvcStrategy
@@ -67,14 +66,12 @@ data class CameraResolution(val name: String, val width: Int, val height: Int)
 @Composable
 fun CaptureScreen(
     modifier: Modifier = Modifier,
-    // Update Callback: Terima 2 List (Foto & Boomerang)
     onSessionComplete: (List<String>, List<String>) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settingsManager = remember { SettingsManager(context) }
 
-    // Inisialisasi Database untuk ambil nomor sesi
     val db = remember { AppDatabase.getDatabase(context) }
 
     // --- SETTINGS ---
@@ -83,14 +80,14 @@ fun CaptureScreen(
     val settingMode by settingsManager.captureModeFlow.collectAsState(initial = "AUTO")
     val settingDelay by settingsManager.autoDelayFlow.collectAsState(initial = 2)
 
-    // --- SESSION ID LOGIC ---
+    // --- SESSION ID ---
     var sessionNumber by remember { mutableIntStateOf(1) }
     LaunchedEffect(Unit) {
         val count = db.sessionDao().getSessionCount()
         sessionNumber = count + 1
     }
 
-    // --- PILIHAN RESOLUSI ---
+    // --- RESOLUSI ---
     val availableResolutions = listOf(
         CameraResolution("Low (1.2MP)", 1600, 1200),
         CameraResolution("Medium (3MP)", 1920, 1440),
@@ -101,25 +98,21 @@ fun CaptureScreen(
     val camWidth = availableResolutions[selectedResIndex].width
     val camHeight = availableResolutions[selectedResIndex].height
 
-    // --- LOADING STATE (ANIMASI LUCU) ---
     var isAppLoading by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         delay(2500)
         isAppLoading = false
     }
 
-    // State Camera
     var cameraClient by remember { mutableStateOf<CameraClient?>(null) }
     var textureViewRef by remember { mutableStateOf<TextureView?>(null) }
     var isCameraReady by remember { mutableStateOf(false) }
 
     val capturedPhotos = remember { mutableStateListOf<String>() }
-    // LIST BOOMERANG (Disimpan sementara disini)
     val boomerangFrames = remember { mutableStateListOf<String>() }
 
     var isSessionRunning by remember { mutableStateOf(false) }
     var isAutoLoopActive by remember { mutableStateOf(false) }
-    // STATE BARU: Apakah sedang merekam Boomerang?
     var isRecordingBoomerang by remember { mutableStateOf(false) }
 
     var countdownValue by remember { mutableIntStateOf(0) }
@@ -129,7 +122,7 @@ fun CaptureScreen(
     val shutterSound = remember { MediaActionSound() }
     val toneGenerator = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 100) }
 
-    // --- LOGIC FOTO BIASA (GRID) ---
+    // --- FIX: LOGIC FOTO YANG LEBIH AMAN ---
     suspend fun performSingleCapture() {
         isSessionRunning = true
         statusMessage = "Get Ready!"
@@ -146,27 +139,36 @@ fun CaptureScreen(
 
         val currentView = textureViewRef
         if (currentView != null && currentView.isAvailable) {
+            // Ambil bitmap dari TextureView
             val bitmap = currentView.getBitmap(camWidth, camHeight)
             if (bitmap != null) {
                 val filename = "kubik_${System.currentTimeMillis()}.jpg"
                 val saveFile = File(context.externalCacheDir, filename)
                 withContext(Dispatchers.IO) {
                     try {
-                        // Mirroring
                         val matrix = android.graphics.Matrix().apply { preScale(-1f, 1f) }
                         val mirrored = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
 
                         FileOutputStream(saveFile).use { out ->
                             mirrored.compress(Bitmap.CompressFormat.JPEG, 100, out)
+                            out.flush() // PASTIKAN FILE TERTULIS SEMPURNA
                         }
-                        bitmap.recycle() // Recycle original, mirrored biarkan GC
+                        bitmap.recycle()
 
                         withContext(Dispatchers.Main) {
-                            capturedPhotos.add(saveFile.absolutePath)
+                            // Cek file benar-benar ada dan ukurannya > 0
+                            if (saveFile.exists() && saveFile.length() > 0) {
+                                capturedPhotos.add(saveFile.absolutePath)
+                            }
                             showFlash = false
                         }
-                    } catch (e: Exception) { withContext(Dispatchers.Main) { showFlash = false } }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) { showFlash = false }
+                    }
                 }
+            } else {
+                // Bitmap null, batalkan flash
+                showFlash = false
             }
         } else {
             delay(500)
@@ -175,50 +177,42 @@ fun CaptureScreen(
         isSessionRunning = false
     }
 
-    // --- LOGIC BOOMERANG (BURST CAPTURE) - FITUR BARU ---
+    // --- LOGIC BOOMERANG ---
     suspend fun performBoomerangCapture() {
         isRecordingBoomerang = true
         statusMessage = "BOOMERANG!"
 
-        // Countdown Khusus
         for (i in 3 downTo 1) {
             countdownValue = i
             try { toneGenerator.startTone(ToneGenerator.TONE_CDMA_PIP, 150) } catch (e: Exception) {}
             delay(1000)
         }
         countdownValue = 0
-        statusMessage = "MOVE NOW!" // Instruksi
+        statusMessage = "MOVE NOW!"
 
         val currentView = textureViewRef
         if (currentView != null && currentView.isAvailable) {
             withContext(Dispatchers.IO) {
-                // Ambil 15 Frame dengan cepat
                 for (i in 1..15) {
-                    // Pakai resolusi kecil (640x480) biar ringan & cepat untuk GIF
                     val smallBitmap = currentView.getBitmap(1280, 960)
-
                     if (smallBitmap != null) {
                         val filename = "boom_${System.currentTimeMillis()}_$i.jpg"
                         val saveFile = File(context.externalCacheDir, filename)
 
-                        // Flip Horizontal juga
                         val matrix = android.graphics.Matrix().apply { preScale(-1f, 1f) }
                         val mirrored = Bitmap.createBitmap(smallBitmap, 0, 0, smallBitmap.width, smallBitmap.height, matrix, true)
 
                         FileOutputStream(saveFile).use { out ->
                             mirrored.compress(Bitmap.CompressFormat.JPEG, 80, out)
+                            out.flush()
                         }
-                        // Simpan path ke list boomerang (bukan ke grid foto)
                         boomerangFrames.add(saveFile.absolutePath)
-
                         smallBitmap.recycle()
                     }
-                    // Jeda antar frame (Speed Boomerang)
                     delay(100)
                 }
             }
         }
-
         statusMessage = "Processing..."
         delay(500)
         isRecordingBoomerang = false
@@ -230,7 +224,6 @@ fun CaptureScreen(
                 if (isAutoLoopActive) return@launch
                 isAutoLoopActive = true
 
-                // 1. Ambil Foto Grid Dulu
                 while (capturedPhotos.size < settingPhotoCount) {
                     if (capturedPhotos.size > 0) {
                         statusMessage = "Next Pose..."
@@ -239,11 +232,9 @@ fun CaptureScreen(
                     performSingleCapture()
                 }
 
-                // 2. Ambil Boomerang (Opsional, tapi default aktif di sini)
                 delay(1000)
                 performBoomerangCapture()
 
-                // 3. Selesai -> Kirim Dua List
                 delay(1000)
                 onSessionComplete(capturedPhotos.toList(), boomerangFrames.toList())
 
@@ -252,7 +243,6 @@ fun CaptureScreen(
                 if (isSessionRunning) return@launch
                 performSingleCapture()
                 if (capturedPhotos.size >= settingPhotoCount) {
-                    // Kalau manual, Boomerang skip dulu atau bisa ditambahkan logic tombol khusus
                     delay(1000)
                     onSessionComplete(capturedPhotos.toList(), emptyList())
                 } else {
@@ -262,7 +252,7 @@ fun CaptureScreen(
         }
     }
 
-    // Permissions & Camera Init (Sama seperti sebelumnya - Manual Logic)
+    // Permissions
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -310,9 +300,7 @@ fun CaptureScreen(
         onDispose { cameraClient?.closeCamera() }
     }
 
-    // --- UI UTAMA ---
     Box(modifier = modifier.fillMaxSize().background(NeoCream)) {
-
         Row(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             // PANEL KIRI (CAMERA)
             Box(
@@ -321,12 +309,12 @@ fun CaptureScreen(
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(24.dp))
                     .border(
-                        // Border jadi MERAH TEBAL kalau lagi Boomerang
                         width = if (isRecordingBoomerang) 8.dp else 4.dp,
                         color = if (isRecordingBoomerang) Color.Red else NeoBlack,
                         shape = RoundedCornerShape(24.dp)
                     )
-                    .background(Color.Black)
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
             ) {
                 CameraPreview(modifier = Modifier.fillMaxSize(), cameraClient = cameraClient) { view ->
                     if (view is TextureView) {
@@ -335,7 +323,6 @@ fun CaptureScreen(
                     }
                 }
 
-                // Overlay Timer
                 if (countdownValue > 0) {
                     val scale by animateFloatAsState(
                         targetValue = if (countdownValue % 2 == 0) 1.2f else 1f,
@@ -349,23 +336,19 @@ fun CaptureScreen(
                     }
                 }
 
-                // Indikator REC (Untuk Boomerang)
                 if (isRecordingBoomerang) {
                     val alpha by rememberInfiniteTransition(label = "rec").animateFloat(
                         initialValue = 1f, targetValue = 0f,
                         animationSpec = infiniteRepeatable(tween(500), RepeatMode.Reverse), label = "alpha"
                     )
                     Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(24.dp)
+                        modifier = Modifier.align(Alignment.TopEnd).padding(24.dp)
                             .background(Color.Red.copy(alpha = alpha), RoundedCornerShape(4.dp))
                             .padding(horizontal = 12.dp, vertical = 4.dp)
                     ) {
                         Text("● REC", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
-
                 if (showFlash) Box(Modifier.fillMaxSize().background(Color.White))
             }
 
@@ -385,13 +368,7 @@ fun CaptureScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     val formattedSession = String.format("%03d", sessionNumber)
                     Text("SESSION #$formattedSession", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
-
-                    Text(
-                        text = "Res: ${availableResolutions[selectedResIndex].name}",
-                        style = MaterialTheme.typography.labelSmall, color = NeoPurple, fontWeight = FontWeight.Bold
-                    )
-
-                    // Status Teks (Berubah saat Boomerang)
+                    Text("Res: ${availableResolutions[selectedResIndex].name}", style = MaterialTheme.typography.labelSmall, color = NeoPurple, fontWeight = FontWeight.Bold)
                     Text(
                         text = if (isRecordingBoomerang) "MOVE NOW!" else if (isAutoLoopActive || isSessionRunning) statusMessage else "Ready?",
                         style = MaterialTheme.typography.headlineMedium,
@@ -406,7 +383,23 @@ fun CaptureScreen(
                 Box(modifier = Modifier.weight(1f).padding(vertical = 16.dp)) {
                     LazyVerticalGrid(columns = GridCells.Fixed(2), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(capturedPhotos) { photoPath ->
-                            AsyncImage(model = ImageRequest.Builder(context).data(File(photoPath)).build(), contentDescription = "Result", contentScale = ContentScale.Crop, modifier = Modifier.aspectRatio(1f).clip(RoundedCornerShape(12.dp)).border(2.dp, NeoBlack, RoundedCornerShape(12.dp)))
+                            // --- FIX: GUNAKAN SUBCOMPOSE UNTUK ANTI CRASH ---
+                            SubcomposeAsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(File(photoPath))
+                                    .crossfade(true) // Animasi halus biar ga kaget
+                                    .build(),
+                                contentDescription = "Result",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .border(2.dp, NeoBlack, RoundedCornerShape(12.dp)),
+                                // Jika error, jangan crash, tampilkan kotak abu saja
+                                error = {
+                                    Box(Modifier.fillMaxSize().background(Color.LightGray))
+                                }
+                            )
                         }
                     }
                 }
@@ -418,7 +411,6 @@ fun CaptureScreen(
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-
                 ShutterButton(
                     isEnabled = !isAutoLoopActive && !isSessionRunning && capturedPhotos.size < settingPhotoCount,
                     onClick = { handleShutterClick() }
@@ -426,15 +418,8 @@ fun CaptureScreen(
             }
         }
 
-        // --- CUTE LOADING OVERLAY ---
-        AnimatedVisibility(
-            visible = isAppLoading,
-            exit = fadeOut(animationSpec = tween(500))
-        ) {
-            Box(
-                modifier = Modifier.fillMaxSize().background(NeoCream),
-                contentAlignment = Alignment.Center
-            ) {
+        AnimatedVisibility(visible = isAppLoading, exit = fadeOut(animationSpec = tween(500))) {
+            Box(modifier = Modifier.fillMaxSize().background(NeoCream), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CuteLoadingAnimation()
                     Spacer(modifier = Modifier.height(24.dp))
@@ -443,7 +428,6 @@ fun CaptureScreen(
             }
         }
 
-        // Dialog Resolusi
         if (showResDialog) {
             AlertDialog(
                 onDismissRequest = { showResDialog = false },

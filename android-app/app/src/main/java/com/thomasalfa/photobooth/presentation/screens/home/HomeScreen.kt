@@ -8,139 +8,160 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.airbnb.lottie.compose.*
 import com.thomasalfa.photobooth.R
-import com.thomasalfa.photobooth.presentation.components.BouncyButton
 import com.thomasalfa.photobooth.ui.theme.*
 import kotlinx.coroutines.delay
 
 @Composable
 fun HomeScreen(
-    hasPlayedIntro: Boolean, // Parameter dari MainActivity
-    onIntroFinished: () -> Unit, // Callback lapor selesai
+    hasPlayedIntro: Boolean,
+    onIntroFinished: () -> Unit,
     onStartSession: () -> Unit,
     onOpenAdmin: () -> Unit
 ) {
-    // Logika Intro: Jika hasPlayedIntro false, mainkan animasi.
-    // Jika true, langsung tampilkan konten.
-
+    // --- INTRO LOGIC ---
     LaunchedEffect(Unit) {
         if (!hasPlayedIntro) {
-            delay(3000) // Durasi Intro
+            delay(3000) // Sesuaikan dengan durasi Lottie kamu
             onIntroFinished()
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(NeoCream) // Background Bersih
+    // Gunakan Surface M3 agar background otomatis mengikuti tema (Cream)
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
     ) {
+        Box(modifier = Modifier.fillMaxSize()) {
 
-        // --- KONTEN UTAMA (Muncul setelah intro atau jika sudah pernah intro) ---
-        AnimatedVisibility(
-            visible = hasPlayedIntro,
-            enter = fadeIn(animationSpec = tween(800))
-        ) {
-            MainContent(onStartSession, onOpenAdmin)
-        }
-
-        // --- INTRO SCREEN (Hanya muncul jika hasPlayedIntro = false) ---
-        AnimatedVisibility(
-            visible = !hasPlayedIntro,
-            exit = fadeOut(animationSpec = tween(800))
-        ) {
-            Box(
-                modifier = Modifier.fillMaxSize().background(NeoCream), // Cover full screen
-                contentAlignment = Alignment.Center
+            // --- KONTEN UTAMA ---
+            AnimatedVisibility(
+                visible = hasPlayedIntro,
+                enter = fadeIn(animationSpec = tween(1000)) // Fade in pelan elegan
             ) {
-                val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.intro_animation))
-                LottieAnimation(
-                    composition = composition,
-                    iterations = 1,
-                    modifier = Modifier.size(250.dp)
-                )
+                HomeContent(onStartSession)
             }
+
+            // --- INTRO ANIMATION ---
+            AnimatedVisibility(
+                visible = !hasPlayedIntro,
+                exit = fadeOut(animationSpec = tween(800))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.intro_animation))
+                    LottieAnimation(
+                        composition = composition,
+                        iterations = 1, // Main sekali saja
+                        modifier = Modifier.fillMaxWidth(0.8f) // Jangan full width, kasih napas
+                    )
+                }
+            }
+
+            // --- HIDDEN ADMIN BUTTON (Pojok Kanan Atas) ---
+            // Kita buat transparan total tapi bisa diklik
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(100.dp)
+                    .clip(CircleShape) // Biar ripple-nya bulat pas diklik (kalau mau debug)
+                    .clickable { onOpenAdmin() }
+            )
         }
     }
 }
 
 @Composable
-fun MainContent(onStartSession: () -> Unit, onOpenAdmin: () -> Unit) {
-    // Animasi Denyut Halus
+fun HomeContent(onStartSession: () -> Unit) {
+    // Animasi Pulse untuk tombol Start
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = 1.05f,
+        targetValue = 1.08f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = FastOutSlowInEasing), // Lebih pelan biar elegan
+            animation = tween(1200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ), label = "scale"
     )
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier.align(Alignment.Center),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // LOGO
-            Image(
-                painter = painterResource(id = R.drawable.logo_kubik),
-                contentDescription = "Logo",
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // 1. Header Text (Typography M3)
+        Text(
+            text = "WELCOME TO",
+            style = MaterialTheme.typography.titleMedium, // Font agak kecil, caps
+            color = MaterialTheme.colorScheme.primary, // Warna Ungu Brand
+            letterSpacing = 4.sp // Spasi lebar biar elegan modern
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 2. LOGO
+        Image(
+            painter = painterResource(id = R.drawable.logo_kubik),
+            contentDescription = "Kubik Logo",
+            modifier = Modifier
+                .width(400.dp)
+                .heightIn(max = 180.dp),
+            contentScale = ContentScale.Fit
+        )
+
+        Spacer(modifier = Modifier.height(80.dp))
+
+        // 3. START BUTTON (Gunakan ExtendedFloatingActionButton M3)
+        // Ini adalah komponen standar M3 untuk tombol aksi utama yang mencolok
+        Box(modifier = Modifier.scale(scale)) {
+            ExtendedFloatingActionButton(
+                onClick = onStartSession,
+                containerColor = MaterialTheme.colorScheme.tertiary, // Warna Kuning/Accent
+                contentColor = MaterialTheme.colorScheme.onTertiary, // Warna Teks Kontras
+                elevation = FloatingActionButtonDefaults.elevation(
+                    defaultElevation = 8.dp,
+                    pressedElevation = 2.dp
+                ),
                 modifier = Modifier
-                    .width(500.dp) // Ukuran proporsional
-                    .heightIn(max = 200.dp),
-                contentScale = ContentScale.Fit
-            )
-
-            Spacer(modifier = Modifier.height(80.dp))
-
-            // TOMBOL MULAI (Style Pill Modern)
-            Box(modifier = Modifier.scale(scale)) {
-                BouncyButton(
+                    .height(80.dp) // Tinggi tombol besar
+                    .width(280.dp)
+            ) {
+                // Isi Tombol
+                Text(
                     text = "TAP TO START",
-                    onClick = onStartSession,
-                    color = NeoYellow,
-                    textColor = NeoBlack,
-                    modifier = Modifier
-                        .width(280.dp)
-                        .height(75.dp)
-                        // Shadow yang lembut (Soft Shadow)
-                        .shadow(12.dp, RoundedCornerShape(50), spotColor = NeoPurple.copy(alpha=0.5f))
+                    style = MaterialTheme.typography.headlineSmall, // Font Tebal & Besar
+                    fontWeight = FontWeight.Black // Extra Bold
                 )
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = "Touch screen to begin",
-                color = Color.Gray,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 1.sp
-            )
         }
 
-        // TOMBOL ADMIN (Hidden tapi area besar di pojok)
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .size(120.dp) // Area tap besar
-                .clickable { onOpenAdmin() }
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // 4. Footer Text
+        Text(
+            text = "Touch anywhere to create memories",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, // Warna abu-abu standar M3
+            textAlign = TextAlign.Center
         )
     }
 }
