@@ -101,6 +101,8 @@ dependencies {
     implementation(libs.androidx.compose.foundation)
     implementation(libs.material)
 
+    implementation("androidx.core:core-splashscreen:1.0.1")
+
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.airbnb.android:lottie-compose:6.1.0")
     implementation(libs.androidx.compose.runtime.saveable)

@@ -18,6 +18,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen // WAJIB ADA
 import com.thomasalfa.photobooth.data.SettingsManager
 import com.thomasalfa.photobooth.presentation.screens.admin.AdminScreen
 import com.thomasalfa.photobooth.presentation.screens.admin.FrameManagerScreen
@@ -30,6 +31,7 @@ import com.thomasalfa.photobooth.presentation.screens.result.UploadProgressScree
 import com.thomasalfa.photobooth.presentation.screens.selection.SelectionScreen
 import com.thomasalfa.photobooth.ui.theme.KubikTheme
 import com.thomasalfa.photobooth.utils.GifProcessor
+import com.thomasalfa.photobooth.utils.LocalDataManager
 import com.thomasalfa.photobooth.utils.SupabaseManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -38,6 +40,9 @@ import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 1. Pasang Splash Screen Native (WAJIB SEBELUM super.onCreate)
+        installSplashScreen()
+
         super.onCreate(savedInstanceState)
 
         setContent {
@@ -48,40 +53,41 @@ class MainActivity : ComponentActivity() {
 
                 var currentScreen by remember { mutableStateOf("HOME") }
 
-                // --- FIX: KEMBALIKAN STATE INTRO ---
+                // State Intro Animation
                 var hasPlayedIntro by rememberSaveable { mutableStateOf(false) }
 
-                // STATE DATA FOTO
+                // State Data Foto
                 var capturedPhotos by remember { mutableStateOf(listOf<String>()) }
                 var selectedPhotos by remember { mutableStateOf(listOf<String>()) }
                 var boomerangPhotos by remember { mutableStateOf(listOf<String>()) }
 
-                // STATE BACKGROUND UPLOAD
+                // State Background Upload & Session
                 var currentSessionUuid by remember { mutableStateOf("") }
+                var currentGifPath by remember { mutableStateOf<String?>(null) } // Menyimpan Path GIF Lokal
                 var isBackgroundUploadDone by remember { mutableStateOf(false) }
                 var backgroundUploadError by remember { mutableStateOf<String?>(null) }
 
-                // State Final Result
+                // State Hasil Final
                 var finalResultPath by remember { mutableStateOf<String?>(null) }
                 var uploadedQrUrl by remember { mutableStateOf("") }
 
-                // PIN State
+                // State Admin PIN
                 var showPinDialog by remember { mutableStateOf(false) }
                 var pinInput by remember { mutableStateOf("") }
                 val correctPin by settingsManager.adminPinFlow.collectAsState(initial = "1234")
 
                 when (currentScreen) {
                     "HOME" -> {
-                        // --- FIX: PASSING PARAMETER INTRO ---
                         HomeScreen(
                             hasPlayedIntro = hasPlayedIntro,
                             onIntroFinished = { hasPlayedIntro = true },
                             onStartSession = {
-                                // Reset Semua State Session
+                                // Reset Semua State untuk Sesi Baru
                                 capturedPhotos = emptyList()
                                 selectedPhotos = emptyList()
                                 boomerangPhotos = emptyList()
                                 currentSessionUuid = ""
+                                currentGifPath = null
                                 isBackgroundUploadDone = false
                                 backgroundUploadError = null
                                 currentScreen = "CAPTURE"
@@ -115,23 +121,29 @@ class MainActivity : ComponentActivity() {
                             onSelectionComplete = { finalSelection ->
                                 selectedPhotos = finalSelection
 
-                                // --- BACKGROUND PROCESS (VERSI RINGAN) ---
+                                // --- MULAI BACKGROUND PROCESS ---
                                 val newUuid = UUID.randomUUID().toString()
                                 currentSessionUuid = newUuid
+                                currentGifPath = null
                                 isBackgroundUploadDone = false
                                 backgroundUploadError = null
 
                                 scope.launch(Dispatchers.IO) {
                                     try {
-                                        // 1. Upload GIF (Jika ada)
+                                        // 1. Generate & Upload GIF
                                         var gifUrl: String? = null
                                         if (boomerangPhotos.isNotEmpty()) {
                                             val gifPath = GifProcessor.generateBoomerangGif(context, boomerangPhotos)
-                                            gifUrl = SupabaseManager.uploadFile(File(gifPath))
+                                            // Simpan path lokal ke state agar bisa disimpan ke DB nanti
+                                            currentGifPath = gifPath
+
+                                            if (gifPath != null) {
+                                                gifUrl = SupabaseManager.uploadFile(File(gifPath))
+                                            }
                                         }
 
-                                        // 2. Insert DB Awal (Cuma UUID + GIF)
-                                        // Foto mentah GAK USAH diupload
+                                        // 2. Insert DB Awal (Cuma UUID + GIF Url)
+                                        // Kita tidak upload raw photos lagi agar cepat & hemat
                                         val success = SupabaseManager.insertInitialSession(
                                             uuid = newUuid,
                                             gifUrl = gifUrl
@@ -155,13 +167,26 @@ class MainActivity : ComponentActivity() {
                     "RESULT" -> {
                         ResultScreen(
                             photoPaths = selectedPhotos,
-                            boomerangPaths = boomerangPhotos,
+                            // Boomerang tidak perlu dikirim ke UI Result lagi
                             onRetake = {
                                 capturedPhotos = emptyList(); selectedPhotos = emptyList()
                                 currentScreen = "HOME"
                             },
-                            onFinishClicked = { finalPath, _ ->
+                            onFinishClicked = { finalPath ->
+                                // Simpan path final
                                 finalResultPath = finalPath
+
+                                // --- SIMPAN KE DATABASE LOKAL (History) ---
+                                scope.launch {
+                                    LocalDataManager.saveSessionToDb(
+                                        context = context,
+                                        uuid = currentSessionUuid,
+                                        finalPath = finalPath,
+                                        gifPath = currentGifPath, // Ambil dari state yang dibuat di background tadi
+                                        rawPhotoPaths = selectedPhotos
+                                    )
+                                }
+
                                 currentScreen = "UPLOAD_PROGRESS"
                             }
                         )
@@ -178,7 +203,7 @@ class MainActivity : ComponentActivity() {
                                 currentScreen = "QR_DISPLAY"
                             },
                             onUploadFailed = {
-                                Toast.makeText(context, "Upload Gagal", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Upload Gagal, Cek Koneksi", Toast.LENGTH_SHORT).show()
                                 currentScreen = "RESULT"
                             }
                         )
@@ -192,7 +217,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Dialog PIN
+                // Dialog PIN Admin
                 if (showPinDialog) {
                     Dialog(onDismissRequest = { showPinDialog = false }) {
                         Card(

@@ -12,32 +12,32 @@ object LayoutProcessor {
         layoutType: String,
         frameBitmap: Bitmap?
     ): Bitmap {
+        // Ukuran Canvas (2:3 Ratio - 4x6 Print)
         val canvasWidth = 1200
         val canvasHeight = 1800
+
         val resultBitmap = Bitmap.createBitmap(canvasWidth, canvasHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(resultBitmap)
 
+        // 1. Gambar Background Putih
         canvas.drawColor(Color.WHITE)
 
+        // 2. Gambar Foto-foto (Langsung resize di Canvas)
         if (layoutType == "STRIP") {
             drawStripLayout(canvas, photos)
         } else {
             drawGridLayout(canvas, photos)
         }
 
+        // 3. Gambar Frame Overlay (Langsung resize di Canvas)
         if (frameBitmap != null) {
-            val scaledFrame = Bitmap.createScaledBitmap(frameBitmap, canvasWidth, canvasHeight, true)
-            canvas.drawBitmap(scaledFrame, 0f, 0f, null)
+            // Trik Optimasi: Tentukan kotak tujuan (Full Canvas)
+            val destRect = Rect(0, 0, canvasWidth, canvasHeight)
+            // null pada parameter ke-2 artinya pakai seluruh bagian gambar frame asli
+            canvas.drawBitmap(frameBitmap, null, destRect, null)
         }
 
         return resultBitmap
-    }
-
-    // --- PERBAIKAN DISINI: HAPUS LOGIKA MATRIX/MIRROR ---
-    // Cukup resize gambar agar pas dengan lubang frame.
-    // Karena foto dari CaptureScreen SUDAH di-mirror, jadi disini jangan dibalik lagi.
-    private fun getScaledPhoto(original: Bitmap, targetW: Int, targetH: Int): Bitmap {
-        return Bitmap.createScaledBitmap(original, targetW, targetH, true)
     }
 
     // --- LOGIC TIPE A: CLASSIC GRID (2x3) ---
@@ -45,6 +45,7 @@ object LayoutProcessor {
         val photoW = 520
         val photoH = 390
 
+        // Koordinat X, Y pojok kiri atas setiap foto
         val coordinates = listOf(
             Pair(60, 350), Pair(620, 350),
             Pair(60, 780), Pair(620, 780),
@@ -54,10 +55,12 @@ object LayoutProcessor {
         for (i in 0 until minOf(photos.size, 6)) {
             val (x, y) = coordinates[i]
 
-            // Panggil fungsi resize biasa (tanpa mirror)
-            val finalPhoto = getScaledPhoto(photos[i], photoW, photoH)
+            // OPTIMASI: Tentukan kotak tujuan (Destination Rectangle)
+            // Canvas akan otomatis me-resize foto agar pas di kotak ini
+            val destRect = Rect(x, y, x + photoW, y + photoH)
 
-            canvas.drawBitmap(finalPhoto, x.toFloat(), y.toFloat(), null)
+            // Gambar langsung! Tidak perlu createScaledBitmap
+            canvas.drawBitmap(photos[i], null, destRect, null)
         }
     }
 
@@ -70,14 +73,17 @@ object LayoutProcessor {
         val rightCoords = listOf(Pair(650, 300), Pair(650, 705), Pair(650, 1110))
 
         for (i in 0 until minOf(photos.size, 3)) {
-            // Panggil fungsi resize biasa (tanpa mirror)
-            val finalPhoto = getScaledPhoto(photos[i], photoW, photoH)
+            val photo = photos[i]
 
+            // Sisi Kiri
             val (lx, ly) = leftCoords[i]
-            canvas.drawBitmap(finalPhoto, lx.toFloat(), ly.toFloat(), null)
+            val leftRect = Rect(lx, ly, lx + photoW, ly + photoH)
+            canvas.drawBitmap(photo, null, leftRect, null)
 
+            // Sisi Kanan (Duplikat)
             val (rx, ry) = rightCoords[i]
-            canvas.drawBitmap(finalPhoto, rx.toFloat(), ry.toFloat(), null)
+            val rightRect = Rect(rx, ry, rx + photoW, ry + photoH)
+            canvas.drawBitmap(photo, null, rightRect, null)
         }
     }
 }

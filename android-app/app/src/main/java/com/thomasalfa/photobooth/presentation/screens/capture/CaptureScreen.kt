@@ -39,8 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import coil.compose.AsyncImage
-import coil.compose.SubcomposeAsyncImage // Ganti ke Subcompose untuk handling error lebih baik
+import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.jiangdg.ausbc.CameraClient
 import com.jiangdg.ausbc.camera.CameraUvcStrategy
@@ -80,12 +79,10 @@ fun CaptureScreen(
     val settingMode by settingsManager.captureModeFlow.collectAsState(initial = "AUTO")
     val settingDelay by settingsManager.autoDelayFlow.collectAsState(initial = 2)
 
-    // --- SESSION ID ---
-    var sessionNumber by remember { mutableIntStateOf(1) }
-    LaunchedEffect(Unit) {
-        val count = db.sessionDao().getSessionCount()
-        sessionNumber = count + 1
-    }
+    // --- SESSION ID LOGIC (FIXED) ---
+    // Mengambil list secara real-time agar sinkron jika data dihapus/ditambah
+    val sessionList by db.sessionDao().getAllSessions().collectAsState(initial = emptyList())
+    val sessionNumber = remember(sessionList) { sessionList.size + 1 }
 
     // --- RESOLUSI ---
     val availableResolutions = listOf(
@@ -122,7 +119,7 @@ fun CaptureScreen(
     val shutterSound = remember { MediaActionSound() }
     val toneGenerator = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 100) }
 
-    // --- FIX: LOGIC FOTO YANG LEBIH AMAN ---
+    // --- LOGIC FOTO ---
     suspend fun performSingleCapture() {
         isSessionRunning = true
         statusMessage = "Get Ready!"
@@ -139,7 +136,6 @@ fun CaptureScreen(
 
         val currentView = textureViewRef
         if (currentView != null && currentView.isAvailable) {
-            // Ambil bitmap dari TextureView
             val bitmap = currentView.getBitmap(camWidth, camHeight)
             if (bitmap != null) {
                 val filename = "kubik_${System.currentTimeMillis()}.jpg"
@@ -151,12 +147,11 @@ fun CaptureScreen(
 
                         FileOutputStream(saveFile).use { out ->
                             mirrored.compress(Bitmap.CompressFormat.JPEG, 100, out)
-                            out.flush() // PASTIKAN FILE TERTULIS SEMPURNA
+                            out.flush()
                         }
                         bitmap.recycle()
 
                         withContext(Dispatchers.Main) {
-                            // Cek file benar-benar ada dan ukurannya > 0
                             if (saveFile.exists() && saveFile.length() > 0) {
                                 capturedPhotos.add(saveFile.absolutePath)
                             }
@@ -166,10 +161,7 @@ fun CaptureScreen(
                         withContext(Dispatchers.Main) { showFlash = false }
                     }
                 }
-            } else {
-                // Bitmap null, batalkan flash
-                showFlash = false
-            }
+            } else { showFlash = false }
         } else {
             delay(500)
             showFlash = false
@@ -300,7 +292,7 @@ fun CaptureScreen(
         onDispose { cameraClient?.closeCamera() }
     }
 
-    Box(modifier = modifier.fillMaxSize().background(NeoCream)) {
+    Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             // PANEL KIRI (CAMERA)
             Box(
@@ -310,7 +302,7 @@ fun CaptureScreen(
                     .clip(RoundedCornerShape(24.dp))
                     .border(
                         width = if (isRecordingBoomerang) 8.dp else 4.dp,
-                        color = if (isRecordingBoomerang) Color.Red else NeoBlack,
+                        color = if (isRecordingBoomerang) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground,
                         shape = RoundedCornerShape(24.dp)
                     )
                     .background(Color.Black),
@@ -332,7 +324,13 @@ fun CaptureScreen(
                         modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(countdownValue.toString(), color = NeoYellow, fontSize = 180.sp, fontWeight = FontWeight.Black, modifier = Modifier.scale(scale))
+                        Text(
+                            countdownValue.toString(),
+                            color = MaterialTheme.colorScheme.tertiary, // Kuning
+                            fontSize = 180.sp,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.scale(scale)
+                        )
                     }
                 }
 
@@ -343,7 +341,7 @@ fun CaptureScreen(
                     )
                     Box(
                         modifier = Modifier.align(Alignment.TopEnd).padding(24.dp)
-                            .background(Color.Red.copy(alpha = alpha), RoundedCornerShape(4.dp))
+                            .background(MaterialTheme.colorScheme.error.copy(alpha = alpha), RoundedCornerShape(4.dp))
                             .padding(horizontal = 12.dp, vertical = 4.dp)
                     ) {
                         Text("● REC", color = Color.White, fontWeight = FontWeight.Bold)
@@ -360,19 +358,21 @@ fun CaptureScreen(
                     .weight(1f)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(24.dp))
-                    .background(Color.White)
+                    .background(MaterialTheme.colorScheme.surface)
                     .padding(24.dp),
                 verticalArrangement = Arrangement.SpaceBetween,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // SESSION NUMBER UPDATE OTOMATIS
                     val formattedSession = String.format("%03d", sessionNumber)
                     Text("SESSION #$formattedSession", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
-                    Text("Res: ${availableResolutions[selectedResIndex].name}", style = MaterialTheme.typography.labelSmall, color = NeoPurple, fontWeight = FontWeight.Bold)
+
+                    Text("Res: ${availableResolutions[selectedResIndex].name}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     Text(
                         text = if (isRecordingBoomerang) "MOVE NOW!" else if (isAutoLoopActive || isSessionRunning) statusMessage else "Ready?",
                         style = MaterialTheme.typography.headlineMedium,
-                        color = if (isRecordingBoomerang) Color.Red else NeoBlack,
+                        color = if (isRecordingBoomerang) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Black,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
@@ -383,19 +383,17 @@ fun CaptureScreen(
                 Box(modifier = Modifier.weight(1f).padding(vertical = 16.dp)) {
                     LazyVerticalGrid(columns = GridCells.Fixed(2), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(capturedPhotos) { photoPath ->
-                            // --- FIX: GUNAKAN SUBCOMPOSE UNTUK ANTI CRASH ---
                             SubcomposeAsyncImage(
                                 model = ImageRequest.Builder(context)
                                     .data(File(photoPath))
-                                    .crossfade(true) // Animasi halus biar ga kaget
+                                    .crossfade(true)
                                     .build(),
                                 contentDescription = "Result",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
                                     .aspectRatio(1f)
                                     .clip(RoundedCornerShape(12.dp))
-                                    .border(2.dp, NeoBlack, RoundedCornerShape(12.dp)),
-                                // Jika error, jangan crash, tampilkan kotak abu saja
+                                    .border(2.dp, MaterialTheme.colorScheme.onSurface, RoundedCornerShape(12.dp)),
                                 error = {
                                     Box(Modifier.fillMaxSize().background(Color.LightGray))
                                 }
@@ -419,11 +417,11 @@ fun CaptureScreen(
         }
 
         AnimatedVisibility(visible = isAppLoading, exit = fadeOut(animationSpec = tween(500))) {
-            Box(modifier = Modifier.fillMaxSize().background(NeoCream), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CuteLoadingAnimation()
                     Spacer(modifier = Modifier.height(24.dp))
-                    Text("Warming Up Camera...", style = MaterialTheme.typography.headlineSmall, color = NeoPurple, fontWeight = FontWeight.Bold)
+                    Text("Warming Up Camera...", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -450,7 +448,7 @@ fun CaptureScreen(
                     }
                 },
                 confirmButton = { TextButton(onClick = { showResDialog = false }) { Text("Cancel") } },
-                containerColor = Color.White,
+                containerColor = MaterialTheme.colorScheme.surface,
                 shape = RoundedCornerShape(16.dp)
             )
         }
@@ -460,7 +458,8 @@ fun CaptureScreen(
 @Composable
 fun CuteLoadingAnimation() {
     val transition = rememberInfiniteTransition(label = "loading")
-    val dots = listOf(NeoPink, NeoYellow, NeoBlue)
+    // Gunakan warna tema untuk dots loading
+    val dots = listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.secondary)
     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         dots.forEachIndexed { index, color ->
             val scale by transition.animateFloat(initialValue = 0.5f, targetValue = 1.2f, animationSpec = infiniteRepeatable(animation = tween(600, delayMillis = index * 150, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse), label = "dot")

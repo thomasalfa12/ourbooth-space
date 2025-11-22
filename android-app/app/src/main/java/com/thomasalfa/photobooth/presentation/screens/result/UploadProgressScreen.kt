@@ -23,13 +23,19 @@ import java.io.File
 fun UploadProgressScreen(
     photoPath: String?,
     sessionUuid: String,
-    isBackgroundUploadDone: Boolean,
-    backgroundError: String?,
+    isBackgroundUploadDone: Boolean, // Nilai ini berubah-ubah dari luar
+    backgroundError: String?,        // Ini juga bisa berubah
     onUploadSuccess: (String) -> Unit,
     onUploadFailed: () -> Unit
 ) {
     val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.paper_plane))
     var statusText by remember { mutableStateOf("Finalizing...") }
+
+    // --- MAGIC FIX: WRAPPER AGAR NILAI SELALU UPDATE ---
+    // Ini membuat LaunchedEffect bisa membaca nilai "live" terbaru dari parameter
+    // meskipun LaunchedEffect-nya tidak di-restart.
+    val currentIsDone by rememberUpdatedState(isBackgroundUploadDone)
+    val currentError by rememberUpdatedState(backgroundError)
 
     LaunchedEffect(Unit) {
         delay(500)
@@ -39,22 +45,23 @@ fun UploadProgressScreen(
         withContext(Dispatchers.IO) {
             try {
                 // 1. CEK STATUS BACKGROUND (Tunggu GIF & DB Init Selesai)
-                while (!isBackgroundUploadDone) {
+                // Kita cek 'currentIsDone' (Live), BUKAN 'isBackgroundUploadDone' (Stale)
+                while (!currentIsDone) {
                     withContext(Dispatchers.Main) { statusText = "Syncing data..." }
                     delay(200) // Cek setiap 0.2 detik
                 }
 
-                // Jika background error, lempar exception
-                if (backgroundError != null) {
-                    throw Exception("Background Error: $backgroundError")
+                // Cek error terbaru
+                if (currentError != null) {
+                    throw Exception("Background Error: $currentError")
                 }
 
-                // 2. UPLOAD FOTO FINAL (Hanya ini yang ditunggu User)
+                // 2. UPLOAD FOTO FINAL
                 withContext(Dispatchers.Main) { statusText = "Uploading Photo..." }
                 val photoFile = File(photoPath)
                 val finalPhotoUrl = SupabaseManager.uploadFile(photoFile) ?: throw Exception("Upload Foto Gagal")
 
-                // 3. UPDATE DATABASE (Patch data terakhir)
+                // 3. UPDATE DATABASE
                 withContext(Dispatchers.Main) { statusText = "Finishing up..." }
                 val updateSuccess = SupabaseManager.updateFinalSession(sessionUuid, finalPhotoUrl)
 
