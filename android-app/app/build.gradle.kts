@@ -15,7 +15,7 @@ android {
     defaultConfig {
         applicationId = "com.thomasalfa.photobooth"
         minSdk = 27
-        targetSdk = 36
+        targetSdk = 33
         versionCode = 1
         versionName = "0.1.0"
 
