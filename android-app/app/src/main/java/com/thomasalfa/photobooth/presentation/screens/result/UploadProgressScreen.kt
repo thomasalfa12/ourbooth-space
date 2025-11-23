@@ -16,6 +16,8 @@ import com.thomasalfa.photobooth.ui.theme.NeoPurple
 import com.thomasalfa.photobooth.utils.SupabaseManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -23,64 +25,66 @@ import java.io.File
 fun UploadProgressScreen(
     photoPath: String?,
     sessionUuid: String,
-    isBackgroundUploadDone: Boolean, // Nilai ini berubah-ubah dari luar
-    backgroundError: String?,        // Ini juga bisa berubah
+    isBackgroundUploadDone: Boolean,
+    backgroundError: String?,
     onUploadSuccess: (String) -> Unit,
     onUploadFailed: () -> Unit
 ) {
     val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.paper_plane))
-    var statusText by remember { mutableStateOf("Finalizing...") }
-
-    // --- MAGIC FIX: WRAPPER AGAR NILAI SELALU UPDATE ---
-    // Ini membuat LaunchedEffect bisa membaca nilai "live" terbaru dari parameter
-    // meskipun LaunchedEffect-nya tidak di-restart.
-    val currentIsDone by rememberUpdatedState(isBackgroundUploadDone)
-    val currentError by rememberUpdatedState(backgroundError)
+    var statusText by remember { mutableStateOf("Preparing...") }
 
     LaunchedEffect(Unit) {
-        delay(500)
+        if (photoPath == null) {
+            onUploadFailed()
+            return@LaunchedEffect
+        }
 
-        if (photoPath == null) { onUploadFailed(); return@LaunchedEffect }
+        try {
+            // 1. Cek Kesiapan DB (Sekarang proses ini INSTAN)
+            // Kita pakai snapshotFlow cuma buat safety kalau internet putus di awal
+            if (!isBackgroundUploadDone) {
+                statusText = "Initializing..."
+                androidx.compose.runtime.snapshotFlow { isBackgroundUploadDone }
+                    .filter { it }
+                    .first()
+            }
 
-        withContext(Dispatchers.IO) {
-            try {
-                // 1. CEK STATUS BACKGROUND (Tunggu GIF & DB Init Selesai)
-                // Kita cek 'currentIsDone' (Live), BUKAN 'isBackgroundUploadDone' (Stale)
-                while (!currentIsDone) {
-                    withContext(Dispatchers.Main) { statusText = "Syncing data..." }
-                    delay(200) // Cek setiap 0.2 detik
-                }
+            // Jika ada error fatal di DB Init (bukan video), baru error
+            if (backgroundError != null) {
+                // Opsional: Abaikan error video, fokus ke DB
+                // throw Exception(backgroundError)
+            }
 
-                // Cek error terbaru
-                if (currentError != null) {
-                    throw Exception("Background Error: $currentError")
-                }
-
-                // 2. UPLOAD FOTO FINAL
+            // 2. Upload Foto Final
+            withContext(Dispatchers.IO) {
                 withContext(Dispatchers.Main) { statusText = "Uploading Photo..." }
-                val photoFile = File(photoPath)
-                val finalPhotoUrl = SupabaseManager.uploadFile(photoFile) ?: throw Exception("Upload Foto Gagal")
 
-                // 3. UPDATE DATABASE
-                withContext(Dispatchers.Main) { statusText = "Finishing up..." }
+                val photoFile = File(photoPath)
+                if (!photoFile.exists()) throw Exception("Photo file not found")
+
+                val finalPhotoUrl = SupabaseManager.uploadFile(photoFile)
+                    ?: throw Exception("Upload Failed")
+
+                // 3. Update DB (Foto Only)
+                withContext(Dispatchers.Main) { statusText = "Finalizing..." }
+
                 val updateSuccess = SupabaseManager.updateFinalSession(sessionUuid, finalPhotoUrl)
 
                 if (updateSuccess) {
                     withContext(Dispatchers.Main) {
                         statusText = "Done!"
                         delay(500)
-                        val webLink = "https://ourbooth-space.vercel.app/?id=$sessionUuid"
-                        onUploadSuccess(webLink)
+                        onUploadSuccess("https://ourbooth-space.vercel.app/?id=$sessionUuid")
                     }
                 } else {
-                    throw Exception("Gagal Update Database")
+                    throw Exception("Connection Error")
                 }
+            }
 
-            } catch (e: Exception) {
-                e.printStackTrace()
-                withContext(Dispatchers.Main) {
-                    onUploadFailed()
-                }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            withContext(Dispatchers.Main) {
+                onUploadFailed()
             }
         }
     }

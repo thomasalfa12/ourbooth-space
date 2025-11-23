@@ -4,7 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Matrix
-import android.graphics.RectF
+import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.os.Bundle
 import android.os.CancellationSignal
@@ -15,6 +15,7 @@ import android.print.PrintDocumentAdapter
 import android.print.PrintDocumentInfo
 import android.print.pdf.PrintedPdfDocument
 import java.io.FileOutputStream
+import kotlin.math.max
 
 class PhotoPrintAdapter(
     private val context: Context,
@@ -31,10 +32,8 @@ class PhotoPrintAdapter(
         callback: LayoutResultCallback?,
         extras: Bundle?
     ) {
-        // 1. Buat Dokumen PDF Virtual
         pdfDocument = PrintedPdfDocument(context, newAttributes)
 
-        // 2. Beri tahu sistem kalau kita punya 1 halaman
         if (cancellationSignal?.isCanceled == true) {
             callback?.onLayoutCancelled()
             return
@@ -45,6 +44,7 @@ class PhotoPrintAdapter(
             .setPageCount(1)
             .build()
 
+        // Return true agar print preview me-refresh layout jika atribut berubah
         callback?.onLayoutFinished(info, true)
     }
 
@@ -54,8 +54,9 @@ class PhotoPrintAdapter(
         cancellationSignal: CancellationSignal?,
         callback: WriteResultCallback?
     ) {
-        // 3. Proses Menggambar Bitmap ke Kertas
         val pdf = pdfDocument ?: return
+
+        // Halaman baru
         val page = pdf.startPage(0)
         val canvas = page.canvas
 
@@ -66,39 +67,41 @@ class PhotoPrintAdapter(
             return
         }
 
-        // --- LOGIKA SCALING AGAR FIT & CENTER (MIRIP CSS COVER) ---
-        val contentWidth = bitmap.width.toFloat()
-        val contentHeight = bitmap.height.toFloat()
+        // --- LOGIC CENTER CROP (FILL PAPER) ---
+        // Agar hasil print full kertas Epson L8050 (4R) tanpa border putih
 
-        // Ukuran Kertas (Canvas) yang diberikan oleh Printer
         val paperWidth = canvas.width.toFloat()
         val paperHeight = canvas.height.toFloat()
+        val imgWidth = bitmap.width.toFloat()
+        val imgHeight = bitmap.height.toFloat()
 
-        // Hitung Scale
-        val scaleX = paperWidth / contentWidth
-        val scaleY = paperHeight / contentHeight
+        // Hitung scale agar gambar memenuhi kertas (ambil scale terbesar)
+        val scale = max(paperWidth / imgWidth, paperHeight / imgHeight)
 
-        // Pilih scale terbesar agar gambar memenuhi kertas (Fill)
-        // Gunakan scaleX/scaleY yang lebih besar agar tidak ada ruang putih
-        val scale = maxOf(scaleX, scaleY)
+        // Hitung dimensi gambar setelah discale
+        val scaledWidth = imgWidth * scale
+        val scaledHeight = imgHeight * scale
 
-        // Hitung posisi tengah
-        val scaledWidth = contentWidth * scale
-        val scaledHeight = contentHeight * scale
-        val translateX = (paperWidth - scaledWidth) / 2
-        val translateY = (paperHeight - scaledHeight) / 2
+        // Hitung posisi agar gambar berada tepat di tengah kertas
+        val translateX = (paperWidth - scaledWidth) / 2f
+        val translateY = (paperHeight - scaledHeight) / 2f
 
         // Terapkan Matrix
         val matrix = Matrix()
         matrix.postScale(scale, scale)
         matrix.postTranslate(translateX, translateY)
 
-        // Gambar Bitmap ke Canvas PDF
-        canvas.drawBitmap(bitmap, matrix, null)
+        // Gambar dengan filtering agar halus
+        val paint = Paint().apply {
+            isAntiAlias = true
+            isFilterBitmap = true
+        }
+
+        // Draw
+        canvas.drawBitmap(bitmap, matrix, paint)
 
         pdf.finishPage(page)
 
-        // 4. Simpan ke Output Stream Printer
         try {
             destination?.let {
                 pdf.writeTo(FileOutputStream(it.fileDescriptor))

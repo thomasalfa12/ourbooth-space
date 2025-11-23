@@ -34,38 +34,34 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
-import coil.request.ImageRequest
 import com.airbnb.lottie.compose.*
 import com.thomasalfa.photobooth.R
 import com.thomasalfa.photobooth.data.SettingsManager
 import com.thomasalfa.photobooth.data.database.AppDatabase
 import com.thomasalfa.photobooth.data.database.FrameEntity
-import com.thomasalfa.photobooth.ui.theme.*
 import com.thomasalfa.photobooth.utils.PhotoPrintAdapter
 import com.thomasalfa.photobooth.utils.layout.LayoutProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
 @Composable
 fun ResultScreen(
     photoPaths: List<String>,
-    // parameter boomerangPaths SUDAH DIHAPUS (Tidak butuh)
     onRetake: () -> Unit,
-    onFinishClicked: (String) -> Unit // Callback cuma butuh path foto final
+    onFinishClicked: (String) -> Unit
 ) {
     val context = LocalContext.current
     val db = remember { AppDatabase.getDatabase(context) }
     val settingsManager = remember { SettingsManager(context) }
 
-    // Load Data
+    // Load Data Frame & Event
     val activeEvent by settingsManager.activeEventFlow.collectAsState(initial = "ALL")
     val allFrames by db.frameDao().getAllFrames().collectAsState(initial = emptyList())
 
-    // Filter Logic
+    // Logic Filter Frame
     val eventFilteredFrames = remember(allFrames, activeEvent) {
         when (activeEvent) {
             "ALL" -> allFrames
@@ -90,79 +86,91 @@ fun ResultScreen(
     var isProcessing by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    // Auto-Select Frame Pertama
     LaunchedEffect(finalFilteredFrames) {
         if (finalFilteredFrames.isNotEmpty() && (selectedFrame == null || !finalFilteredFrames.contains(selectedFrame))) {
             selectedFrame = finalFilteredFrames[0]
         }
     }
 
-    // --- PROCESSOR (Hanya Foto, Tanpa GIF) ---
+    // --- CORE: LAYOUT PROCESSOR ---
     LaunchedEffect(photoPaths, selectedFrame) {
         if (selectedFrame != null && photoPaths.isNotEmpty()) {
             isProcessing = true
             errorMessage = null
-            // Delay kecil biar transisi UI smooth, bukan karena berat proses
-            delay(100)
+            delay(100) // UI smooth transition
 
-            // Pakai Dispatchers.Default untuk proses CPU berat
             val job = launch(Dispatchers.Default) {
+                var photoBitmaps: List<Bitmap> = emptyList()
+                var frameBitmap: Bitmap? = null
+
                 try {
+                    // 1. Load Photos (Downsample 50% biar ringan)
                     val options = BitmapFactory.Options().apply { inSampleSize = 2 }
-                    val photoBitmaps = photoPaths.mapNotNull { path -> BitmapFactory.decodeFile(path, options) }
+                    photoBitmaps = photoPaths.mapNotNull { path -> BitmapFactory.decodeFile(path, options) }
 
                     if (photoBitmaps.isNotEmpty()) {
-                        val frameBitmap = BitmapFactory.decodeFile(selectedFrame!!.imagePath)
+                        // 2. Load Frame
+                        frameBitmap = BitmapFactory.decodeFile(selectedFrame!!.imagePath)
+
                         if (frameBitmap != null) {
-                            // Proses Layout (Cepat karena pakai Rect)
+                            // 3. Process Layout
                             val resultBitmap = LayoutProcessor.processLayout(
                                 photos = photoBitmaps,
                                 layoutType = selectedFrame!!.layoutType,
                                 frameBitmap = frameBitmap
                             )
 
+                            // 4. Save Final Result
                             val file = File(context.cacheDir, "final_${System.currentTimeMillis()}.jpg")
                             val stream = FileOutputStream(file)
+                            // Kompresi 100% (Maximum Quality) untuk Print
                             resultBitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
-                            stream.flush(); stream.close()
+                            stream.flush()
+                            stream.close()
 
-                            // Cleanup
-                            photoBitmaps.forEach { it.recycle() }
-                            frameBitmap.recycle()
-
-                            // Update UI
                             finalLayoutPath = file.absolutePath
                         }
                     }
                 } catch (t: Throwable) {
                     t.printStackTrace()
-                    errorMessage = "Ouch! ${t.message}"
+                    errorMessage = "Error: ${t.message}"
+                } finally {
+                    // Cleanup Memory (PENTING!)
+                    photoBitmaps.forEach { it.recycle() }
+                    frameBitmap?.recycle()
                 }
             }
-
-            job.join() // Tunggu layout selesai
+            job.join()
             isProcessing = false
         }
     }
 
+    // --- CORE: PRINT OPTIMIZATION (EPSON L8050) ---
     fun handlePrint() {
         finalLayoutPath?.let { path ->
             val bitmap = BitmapFactory.decodeFile(path) ?: return
             val printManager = context.getSystemService(Context.PRINT_SERVICE) as PrintManager
-            val jobName = "KubikCam_${System.currentTimeMillis()}"
+            val jobName = "Kubik_Print_${System.currentTimeMillis()}"
+
+            // SETTINGAN KUNCI AGAR LANGSUNG PAS DI KERTAS
             val attributes = PrintAttributes.Builder()
-                .setMediaSize(PrintAttributes.MediaSize.NA_INDEX_4X6)
-                .setResolution(PrintAttributes.Resolution("id", "print", 300, 300))
+                .setMediaSize(PrintAttributes.MediaSize.NA_INDEX_4X6) // Kunci 4R
+                .setResolution(PrintAttributes.Resolution("id", "Epson", 300, 300)) // Request High Res
                 .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
-                .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
+                .setMinMargins(PrintAttributes.Margins.NO_MARGINS) // BORDERLESS
                 .build()
+
+            // Panggil Adapter yang sudah kita perbaiki sebelumnya
             printManager.print(jobName, PhotoPrintAdapter(context, bitmap, jobName), attributes)
         }
     }
 
+    // --- UI LAYOUT ---
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Row(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
 
-            // LEFT: PREVIEW
+            // KIRI: PREVIEW
             Card(
                 modifier = Modifier.weight(1.1f).fillMaxHeight(),
                 shape = RoundedCornerShape(28.dp),
@@ -187,7 +195,7 @@ fun ResultScreen(
                 }
             }
 
-            // RIGHT: CONTROLS
+            // KANAN: KONTROL
             Column(modifier = Modifier.weight(0.9f).fillMaxHeight()) {
                 Text("FINALIZE", style = MaterialTheme.typography.labelLarge, color = Color.Gray, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
@@ -195,6 +203,7 @@ fun ResultScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
+                // Tab Filter
                 ScrollableTabRow(
                     selectedTabIndex = selectedTabIndex,
                     containerColor = Color.Transparent,
@@ -212,6 +221,7 @@ fun ResultScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // List Frame
                 if (finalFilteredFrames.isNotEmpty()) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth().height(130.dp)) {
                         items(finalFilteredFrames) { frame ->
@@ -224,7 +234,9 @@ fun ResultScreen(
 
                 Spacer(modifier = Modifier.weight(1f))
 
+                // Tombol Aksi
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // TOMBOL PRINT (Optimized)
                     OutlinedButton(
                         onClick = { handlePrint() },
                         modifier = Modifier.fillMaxWidth().height(56.dp),
@@ -238,6 +250,7 @@ fun ResultScreen(
                         Text("PRINT COPY", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
 
+                    // TOMBOL FINISH
                     Button(
                         onClick = { if(finalLayoutPath != null) onFinishClicked(finalLayoutPath!!) },
                         modifier = Modifier.fillMaxWidth().height(72.dp),
@@ -251,11 +264,12 @@ fun ResultScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text("FINISH & GET QR", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                                Text("Upload to cloud & share", style = MaterialTheme.typography.bodySmall)
+                                Text("Upload to Cloud & Generate QR", style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
 
+                    // TOMBOL RETAKE
                     TextButton(onClick = onRetake, modifier = Modifier.fillMaxWidth()) {
                         Text("Start Over / Retake", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
                     }

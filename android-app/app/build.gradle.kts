@@ -109,6 +109,9 @@ dependencies {
     implementation(libs.androidx.foundation)
     implementation(libs.androidx.compose.animation)
 
+    implementation("org.jcodec:jcodec:0.2.5")
+    implementation("org.jcodec:jcodec-android:0.2.5")
+
     val room_version = "2.6.1"
     implementation("androidx.room:room-runtime:$room_version")
     implementation("androidx.room:room-ktx:$room_version")

@@ -14,18 +14,24 @@ import java.io.File
 import java.util.UUID
 import kotlin.time.Duration.Companion.minutes
 
-// Model Data (raw_photos_urls boleh null dan kita acuhkan)
+// --- MODEL DATA ---
 @Serializable
 data class SessionTable(
     @SerialName("session_uuid") val sessionUuid: String,
     @SerialName("final_photo_url") val finalPhotoUrl: String? = null,
-    @SerialName("gif_url") val gifUrl: String? = null,
+    @SerialName("video_url") val videoUrl: String? = null,
     @SerialName("raw_photos_urls") val rawPhotosUrls: String? = null
 )
 
 @Serializable
-data class UpdateSessionTable(
+data class UpdatePhotoTable(
     @SerialName("final_photo_url") val finalPhotoUrl: String
+)
+
+// Model Baru untuk Update Video Susulan
+@Serializable
+data class UpdateVideoTable(
+    @SerialName("video_url") val videoUrl: String
 )
 
 object SupabaseManager {
@@ -58,38 +64,54 @@ object SupabaseManager {
         }
     }
 
-    // REVISI: Hapus parameter rawPhotoUrls
-    suspend fun insertInitialSession(uuid: String, gifUrl: String?): Boolean {
+    // INSERT AWAL (Cukup UUID saja, Video boleh null dulu)
+    suspend fun insertInitialSession(uuid: String, videoUrl: String?): Boolean {
         return withContext(Dispatchers.IO) {
             try {
                 val data = SessionTable(
                     sessionUuid = uuid,
                     finalPhotoUrl = null,
-                    gifUrl = gifUrl,
-                    rawPhotosUrls = null // Kita biarkan null (kosong)
+                    videoUrl = videoUrl,
+                    rawPhotosUrls = null
                 )
                 client.from("sessions").insert(data)
-                Log.d("SUPABASE", "Initial DB Insert Success")
+                Log.d("SUPABASE", "✅ Initial DB Insert Success")
                 true
             } catch (e: Exception) {
-                Log.e("SUPABASE", "Initial DB Failed: ${e.message}")
+                Log.e("SUPABASE", "❌ Initial DB Failed: ${e.message}")
                 false
             }
         }
     }
 
+    // UPDATE FINAL PHOTO (Dipanggil di UploadProgressScreen)
     suspend fun updateFinalSession(uuid: String, finalPhotoUrl: String): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                val updateData = UpdateSessionTable(finalPhotoUrl = finalPhotoUrl)
+                val updateData = UpdatePhotoTable(finalPhotoUrl = finalPhotoUrl)
                 client.from("sessions").update(updateData) {
                     filter { SessionTable::sessionUuid eq uuid }
                 }
-                Log.d("SUPABASE", "Final DB Update Success")
+                Log.d("SUPABASE", "✅ Final Photo Update Success")
                 true
             } catch (e: Exception) {
-                Log.e("SUPABASE", "Final DB Update Failed: ${e.message}")
+                Log.e("SUPABASE", "❌ Final Photo Update Failed: ${e.message}")
                 false
+            }
+        }
+    }
+
+    // FUNGSI BARU: UPDATE VIDEO SUSULAN (Background)
+    suspend fun updateSessionVideo(uuid: String, videoUrl: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                val updateData = UpdateVideoTable(videoUrl = videoUrl)
+                client.from("sessions").update(updateData) {
+                    filter { SessionTable::sessionUuid eq uuid }
+                }
+                Log.d("SUPABASE", "✅ Background Video Update Success")
+            } catch (e: Exception) {
+                Log.e("SUPABASE", "❌ Background Video Update Failed: ${e.message}")
             }
         }
     }
