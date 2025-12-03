@@ -16,31 +16,31 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.thomasalfa.photobooth.ui.theme.*
-import com.thomasalfa.photobooth.utils.LocalShareManager // Kita pinjam fungsi generateQR-nya
+import com.thomasalfa.photobooth.utils.LocalShareManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
 fun QrCodeScreen(
-    url: String,
-    onFinish: () -> Unit // Balik ke Home
+    url: String, // URL SUDAH PASTI ADA
+    onFinish: () -> Unit
 ) {
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     val scope = rememberCoroutineScope()
 
-    // Generate QR dari URL Supabase
+    // Generate QR Image (Cepat, Local process)
     LaunchedEffect(url) {
         scope.launch {
             qrBitmap = LocalShareManager.generateQrCode(url)
         }
     }
 
-    // Timer Otomatis Balik ke Home (Misal 60 detik) agar tidak stuck kalau user pergi
+    // Auto Close 60s
     LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(60000) // 1 Menit
+        delay(60000)
         onFinish()
     }
 
@@ -51,39 +51,28 @@ fun QrCodeScreen(
             .padding(32.dp),
         contentAlignment = Alignment.Center
     ) {
+        // ... (Sisa UI Card sama persis dengan yang Anda kirim, tidak perlu ubah)
         Card(
             colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(32.dp),
             elevation = CardDefaults.cardElevation(10.dp),
-            modifier = Modifier.fillMaxWidth(0.6f) // Tidak full lebar biar rapi
+            modifier = Modifier.fillMaxWidth(0.6f)
         ) {
             Box {
-                // Tombol X (Pojok Kanan)
-                IconButton(
-                    onClick = onFinish,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-                ) {
+                IconButton(onClick = onFinish, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
                     Icon(Icons.Default.Close, null, tint = Color.Gray, modifier = Modifier.size(32.dp))
                 }
-
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(48.dp).fillMaxWidth()
-                ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(48.dp).fillMaxWidth()) {
                     Text("YOUR MEMORIES ARE READY!", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = NeoPurple)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("Scan to download & share instantly", color = Color.Gray)
-
                     Spacer(modifier = Modifier.height(32.dp))
 
                     if (qrBitmap != null) {
                         Image(
                             bitmap = qrBitmap!!.asImageBitmap(),
                             contentDescription = "QR",
-                            modifier = Modifier
-                                .size(350.dp)
-                                .border(4.dp, NeoBlack, RoundedCornerShape(16.dp))
-                                .padding(16.dp),
+                            modifier = Modifier.size(350.dp).border(4.dp, NeoBlack, RoundedCornerShape(16.dp)).padding(16.dp),
                             contentScale = ContentScale.Fit
                         )
                     } else {
@@ -91,13 +80,7 @@ fun QrCodeScreen(
                     }
 
                     Spacer(modifier = Modifier.height(40.dp))
-
-                    Button(
-                        onClick = onFinish,
-                        colors = ButtonDefaults.buttonColors(containerColor = NeoGreen),
-                        modifier = Modifier.fillMaxWidth().height(60.dp),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
+                    Button(onClick = onFinish, colors = ButtonDefaults.buttonColors(containerColor = NeoGreen), modifier = Modifier.fillMaxWidth().height(60.dp), shape = RoundedCornerShape(16.dp)) {
                         Text("I'M DONE - START NEW SESSION", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     }
                 }

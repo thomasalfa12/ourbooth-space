@@ -111,6 +111,7 @@ dependencies {
 
     implementation("org.jcodec:jcodec:0.2.5")
     implementation("org.jcodec:jcodec-android:0.2.5")
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
 
     val room_version = "2.6.1"
     implementation("androidx.room:room-runtime:$room_version")

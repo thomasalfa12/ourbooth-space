@@ -5,23 +5,20 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.print.PrintAttributes
 import android.print.PrintManager
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,288 +30,308 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import coil.compose.rememberAsyncImagePainter
 import com.airbnb.lottie.compose.*
 import com.thomasalfa.photobooth.R
-import com.thomasalfa.photobooth.data.SettingsManager
-import com.thomasalfa.photobooth.data.database.AppDatabase
 import com.thomasalfa.photobooth.data.database.FrameEntity
 import com.thomasalfa.photobooth.utils.PhotoPrintAdapter
+import com.thomasalfa.photobooth.utils.SupabaseManager
 import com.thomasalfa.photobooth.utils.layout.LayoutProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
 @Composable
 fun ResultScreen(
-    photoPaths: List<String>,
+    photoPaths: List<String>,   // Foto yang sudah diurutkan dari Editor
+    selectedFrame: FrameEntity, // Frame yang sudah dipilih di awal (FIXED)
+    sessionUuid: String,
     onRetake: () -> Unit,
-    onFinishClicked: (String) -> Unit
+    onFinishClicked: (String) -> Unit // Mengirim URL QR Final
 ) {
     val context = LocalContext.current
-    val db = remember { AppDatabase.getDatabase(context) }
-    val settingsManager = remember { SettingsManager(context) }
+    val scope = rememberCoroutineScope()
 
-    // Load Data Frame & Event
-    val activeEvent by settingsManager.activeEventFlow.collectAsState(initial = "ALL")
-    val allFrames by db.frameDao().getAllFrames().collectAsState(initial = emptyList())
-
-    // Logic Filter Frame
-    val eventFilteredFrames = remember(allFrames, activeEvent) {
-        when (activeEvent) {
-            "ALL" -> allFrames
-            "Default Only" -> allFrames.filter { it.category == "Default" }
-            else -> allFrames.filter { it.category == "Default" || it.category == activeEvent }
-        }
-    }
-
-    var selectedTabIndex by remember { mutableIntStateOf(0) }
-    val tabs = listOf("All Frames", "Grid 2x3", "Strip Cut")
-
-    val finalFilteredFrames = remember(eventFilteredFrames, selectedTabIndex) {
-        when (selectedTabIndex) {
-            1 -> eventFilteredFrames.filter { it.layoutType == "GRID" }
-            2 -> eventFilteredFrames.filter { it.layoutType == "STRIP" }
-            else -> eventFilteredFrames
-        }
-    }
-
-    var selectedFrame by remember { mutableStateOf<FrameEntity?>(null) }
+    // --- STATE ---
     var finalLayoutPath by remember { mutableStateOf<String?>(null) }
-    var isProcessing by remember { mutableStateOf(false) }
+
+    // UI States
+    var isGeneratingLayout by remember { mutableStateOf(true) } // Default true karena langsung proses pas masuk
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Auto-Select Frame Pertama
-    LaunchedEffect(finalFilteredFrames) {
-        if (finalFilteredFrames.isNotEmpty() && (selectedFrame == null || !finalFilteredFrames.contains(selectedFrame))) {
-            selectedFrame = finalFilteredFrames[0]
-        }
-    }
+    // UPLOAD STATES (Smart Background Process)
+    var uploadedUrl by remember { mutableStateOf<String?>(null) }
+    var isUploading by remember { mutableStateOf(false) }
+    var showFinalizingOverlay by remember { mutableStateOf(false) }
 
-    // --- CORE: LAYOUT PROCESSOR ---
-    LaunchedEffect(photoPaths, selectedFrame) {
-        if (selectedFrame != null && photoPaths.isNotEmpty()) {
-            isProcessing = true
-            errorMessage = null
-            delay(100) // UI smooth transition
+    // --- 1. OTOMATIS GENERATE LAYOUT & UPLOAD SAAT MASUK ---
+    LaunchedEffect(Unit) { // Run ONCE saat layar dibuka
+        isGeneratingLayout = true
+        isUploading = true
+        errorMessage = null
 
-            val job = launch(Dispatchers.Default) {
-                var photoBitmaps: List<Bitmap> = emptyList()
-                var frameBitmap: Bitmap? = null
+        val job = launch(Dispatchers.Default) {
+            var photoBitmaps: List<Bitmap> = emptyList()
+            var frameBitmap: Bitmap? = null
 
-                try {
-                    // 1. Load Photos (Downsample 50% biar ringan)
-                    val options = BitmapFactory.Options().apply { inSampleSize = 2 }
-                    photoBitmaps = photoPaths.mapNotNull { path -> BitmapFactory.decodeFile(path, options) }
+            try {
+                // A. GENERATE HIGH-RES LAYOUT
+                val options = BitmapFactory.Options().apply { inSampleSize = 2 } // Optimasi memori sedikit
+                photoBitmaps = photoPaths.mapNotNull { path -> BitmapFactory.decodeFile(path, options) }
 
-                    if (photoBitmaps.isNotEmpty()) {
-                        // 2. Load Frame
-                        frameBitmap = BitmapFactory.decodeFile(selectedFrame!!.imagePath)
+                if (photoBitmaps.isNotEmpty()) {
+                    frameBitmap = BitmapFactory.decodeFile(selectedFrame.imagePath)
 
-                        if (frameBitmap != null) {
-                            // 3. Process Layout
-                            val resultBitmap = LayoutProcessor.processLayout(
-                                photos = photoBitmaps,
-                                layoutType = selectedFrame!!.layoutType,
-                                frameBitmap = frameBitmap
-                            )
+                    if (frameBitmap != null) {
+                        val resultBitmap = LayoutProcessor.processLayout(
+                            photos = photoBitmaps,
+                            layoutType = selectedFrame.layoutType,
+                            frameBitmap = frameBitmap
+                        )
 
-                            // 4. Save Final Result
-                            val file = File(context.cacheDir, "final_${System.currentTimeMillis()}.jpg")
-                            val stream = FileOutputStream(file)
-                            // Kompresi 100% (Maximum Quality) untuk Print
-                            resultBitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
-                            stream.flush()
-                            stream.close()
+                        // Save Final File
+                        val file = File(context.cacheDir, "final_${System.currentTimeMillis()}.jpg")
+                        val stream = FileOutputStream(file)
+                        resultBitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
+                        stream.flush()
+                        stream.close()
 
+                        // Update UI: Layout Ready untuk Preview & Print
+                        withContext(Dispatchers.Main) {
                             finalLayoutPath = file.absolutePath
+                            isGeneratingLayout = false
+                        }
+
+                        // B. BACKGROUND UPLOAD (Fire & Forget)
+                        // Langsung upload file yang baru saja digenerate
+                        val uploadedLink = SupabaseManager.uploadFile(file)
+
+                        if (uploadedLink != null) {
+                            SupabaseManager.updateFinalSession(sessionUuid, uploadedLink)
+                            withContext(Dispatchers.Main) {
+                                uploadedUrl = uploadedLink
+                                isUploading = false // Upload Selesai!
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) { isUploading = false } // Gagal diam-diam (retry nanti)
                         }
                     }
-                } catch (t: Throwable) {
-                    t.printStackTrace()
-                    errorMessage = "Error: ${t.message}"
-                } finally {
-                    // Cleanup Memory (PENTING!)
-                    photoBitmaps.forEach { it.recycle() }
-                    frameBitmap?.recycle()
                 }
+            } catch (t: Throwable) {
+                t.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    errorMessage = "Error: ${t.message}"
+                    isGeneratingLayout = false
+                    isUploading = false
+                }
+            } finally {
+                photoBitmaps.forEach { it.recycle() }
+                frameBitmap?.recycle()
             }
-            job.join()
-            isProcessing = false
         }
     }
 
-    // --- CORE: PRINT OPTIMIZATION (EPSON L8050) ---
+    // --- FUNCTION: HANDLE FINISH ---
+    fun executeFinish() {
+        if (uploadedUrl != null) {
+            // BEST CASE: Upload sudah selesai duluan di background
+            val finalQrUrl = "https://ourbooth-space.vercel.app/?id=$sessionUuid"
+            onFinishClicked(finalQrUrl)
+        } else {
+            // WORST CASE: Internet lambat, upload belum beres
+            showFinalizingOverlay = true
+
+            scope.launch(Dispatchers.IO) {
+                // Tunggu sebentar (polling)
+                var attempt = 0
+                while (uploadedUrl == null && attempt < 20) { // Max 10 detik
+                    delay(500)
+                    if (uploadedUrl != null) break
+                    attempt++
+                }
+
+                // Jika masih gagal background, coba paksa upload ulang
+                if (uploadedUrl == null && finalLayoutPath != null) {
+                    try {
+                        val file = File(finalLayoutPath!!)
+                        val link = SupabaseManager.uploadFile(file)
+                        if (link != null) {
+                            SupabaseManager.updateFinalSession(sessionUuid, link)
+                            uploadedUrl = link
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    showFinalizingOverlay = false
+                    if (uploadedUrl != null) {
+                        val finalQrUrl = "https://ourbooth-space.vercel.app/?id=$sessionUuid"
+                        onFinishClicked(finalQrUrl)
+                    } else {
+                        errorMessage = "Upload Failed. Check Internet."
+                    }
+                }
+            }
+        }
+    }
+
+    // --- FUNCTION: PRINT ---
     fun handlePrint() {
         finalLayoutPath?.let { path ->
             val bitmap = BitmapFactory.decodeFile(path) ?: return
             val printManager = context.getSystemService(Context.PRINT_SERVICE) as PrintManager
             val jobName = "Kubik_Print_${System.currentTimeMillis()}"
-
-            // SETTINGAN KUNCI AGAR LANGSUNG PAS DI KERTAS
             val attributes = PrintAttributes.Builder()
-                .setMediaSize(PrintAttributes.MediaSize.NA_INDEX_4X6) // Kunci 4R
-                .setResolution(PrintAttributes.Resolution("id", "Epson", 300, 300)) // Request High Res
+                .setMediaSize(PrintAttributes.MediaSize.NA_INDEX_4X6)
+                .setResolution(PrintAttributes.Resolution("id", "Epson", 300, 300))
                 .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
-                .setMinMargins(PrintAttributes.Margins.NO_MARGINS) // BORDERLESS
+                .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
                 .build()
-
-            // Panggil Adapter yang sudah kita perbaiki sebelumnya
             printManager.print(jobName, PhotoPrintAdapter(context, bitmap, jobName), attributes)
         }
     }
 
     // --- UI LAYOUT ---
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Row(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Row(modifier = Modifier.fillMaxSize().padding(32.dp), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
 
-            // KIRI: PREVIEW
-            Card(
-                modifier = Modifier.weight(1.1f).fillMaxHeight(),
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-            ) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    if (isProcessing) {
-                        ProcessingState()
-                    } else if (errorMessage != null) {
-                        ErrorState(errorMessage!!)
-                    } else {
-                        finalLayoutPath?.let { path ->
-                            AsyncImage(
-                                model = File(path),
-                                contentDescription = "Final Result",
-                                modifier = Modifier.fillMaxSize().padding(24.dp).clip(RoundedCornerShape(16.dp)),
-                                contentScale = ContentScale.Fit
-                            )
-                        } ?: Text("Select a frame to start", color = Color.Gray)
-                    }
-                }
-            }
-
-            // KANAN: KONTROL
-            Column(modifier = Modifier.weight(0.9f).fillMaxHeight()) {
-                Text("FINALIZE", style = MaterialTheme.typography.labelLarge, color = Color.Gray, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("Make it Yours!", style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.Black)
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Tab Filter
-                ScrollableTabRow(
-                    selectedTabIndex = selectedTabIndex,
-                    containerColor = Color.Transparent,
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    edgePadding = 0.dp,
-                    indicator = { tabPositions ->
-                        TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]).height(3.dp).clip(RoundedCornerShape(4.dp)), color = MaterialTheme.colorScheme.primary)
-                    },
-                    divider = {}
+                // KIRI: PREVIEW FINAL (Besar & Jelas)
+                Card(
+                    modifier = Modifier.weight(1.3f).fillMaxHeight(),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(8.dp)
                 ) {
-                    tabs.forEachIndexed { index, title ->
-                        Tab(selected = selectedTabIndex == index, onClick = { selectedTabIndex = index }, text = { Text(title, fontWeight = if(selectedTabIndex == index) FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp) })
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // List Frame
-                if (finalFilteredFrames.isNotEmpty()) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth().height(130.dp)) {
-                        items(finalFilteredFrames) { frame ->
-                            FrameSelectionCard(frame, isSelected = selectedFrame?.id == frame.id, onClick = { selectedFrame = frame })
-                        }
-                    }
-                } else {
-                    Box(modifier = Modifier.fillMaxWidth().height(130.dp), contentAlignment = Alignment.Center) { Text("No frames available", color = Color.Gray) }
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                // Tombol Aksi
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // TOMBOL PRINT (Optimized)
-                    OutlinedButton(
-                        onClick = { handlePrint() },
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(2.dp, MaterialTheme.colorScheme.outline),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
-                        enabled = finalLayoutPath != null && !isProcessing
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Send, null, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("PRINT COPY", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    }
-
-                    // TOMBOL FINISH
-                    Button(
-                        onClick = { if(finalLayoutPath != null) onFinishClicked(finalLayoutPath!!) },
-                        modifier = Modifier.fillMaxWidth().height(72.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
-                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp, pressedElevation = 2.dp),
-                        enabled = finalLayoutPath != null && !isProcessing
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.CheckCircle, null, modifier = Modifier.size(28.dp))
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text("FINISH & GET QR", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                                Text("Upload to Cloud & Generate QR", style = MaterialTheme.typography.bodySmall)
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        if (isGeneratingLayout) {
+                            ProcessingState() // Loading Animation
+                        } else if (errorMessage != null) {
+                            ErrorState(errorMessage!!)
+                        } else {
+                            finalLayoutPath?.let { path ->
+                                Box {
+                                    AsyncImage(
+                                        model = File(path),
+                                        contentDescription = "Final Result",
+                                        modifier = Modifier.fillMaxSize().padding(16.dp).clip(RoundedCornerShape(16.dp)),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                    // Indikator Upload Kecil (UX: Biar user tau sistem sedang bekerja)
+                                    if (isUploading) {
+                                        Surface(
+                                            modifier = Modifier.align(Alignment.TopEnd).padding(24.dp),
+                                            shape = RoundedCornerShape(20.dp),
+                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                                            shadowElevation = 4.dp
+                                        ) {
+                                            Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text("Cloud Sync...", style = MaterialTheme.typography.labelSmall)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
+                }
 
-                    // TOMBOL RETAKE
-                    TextButton(onClick = onRetake, modifier = Modifier.fillMaxWidth()) {
-                        Text("Start Over / Retake", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+                // KANAN: ACTION PANEL (Simpel, Tanpa Frame Selector)
+                Column(
+                    modifier = Modifier.weight(0.7f).fillMaxHeight(),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text("MEMORIES READY!", style = MaterialTheme.typography.labelLarge, color = Color.Gray, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
+                    Text("Print or Share?", style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.Black)
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    // ACTION BUTTONS
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+
+                        // 1. PRINT BUTTON
+                        OutlinedButton(
+                            onClick = { handlePrint() },
+                            modifier = Modifier.fillMaxWidth().height(64.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            enabled = finalLayoutPath != null && !isGeneratingLayout
+                        ) {
+                            Icon(Icons.Filled.Print, null)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("PRINT PHOTO", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        // 2. FINISH BUTTON (Primary)
+                        Button(
+                            onClick = { executeFinish() },
+                            modifier = Modifier.fillMaxWidth().height(80.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            enabled = finalLayoutPath != null && !isGeneratingLayout
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.QrCode, null, modifier = Modifier.size(32.dp))
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column {
+                                    Text("GET QR CODE", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                                    val statusText = if (uploadedUrl != null) "Ready to Scan" else if (isUploading) "Uploading..." else "Process & Finish"
+                                    Text(statusText, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.8f))
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // 3. RETAKE BUTTON
+                        TextButton(onClick = onRetake, modifier = Modifier.fillMaxWidth()) {
+                            Text("Start Over (Delete All)", color = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
             }
         }
-    }
-}
 
-@Composable
-fun FrameSelectionCard(frame: FrameEntity, isSelected: Boolean, onClick: () -> Unit) {
-    val borderWidth by animateDpAsState(if (isSelected) 4.dp else 0.dp, label = "border")
-    val scale by animateDpAsState(if (isSelected) 110.dp else 100.dp, label = "size")
-
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Card(
-            modifier = Modifier.size(scale).clickable { onClick() },
-            shape = RoundedCornerShape(16.dp),
-            border = if (isSelected) BorderStroke(borderWidth, MaterialTheme.colorScheme.primary) else null,
-            elevation = CardDefaults.cardElevation(if(isSelected) 8.dp else 2.dp)
+        // --- FINALIZING OVERLAY (Blocker) ---
+        AnimatedVisibility(
+            visible = showFinalizingOverlay,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center)
         ) {
-            Box {
-                Image(
-                    painter = rememberAsyncImagePainter(File(frame.imagePath)), contentDescription = null,
-                    modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
-                )
-                if (isSelected) {
-                    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(32.dp).background(MaterialTheme.colorScheme.primary, CircleShape).padding(4.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.7f))
+                    .clickable(enabled = false) {},
+                contentAlignment = Alignment.Center
+            ) {
+                Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(24.dp)) {
+                    Column(modifier = Modifier.padding(40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(modifier = Modifier.size(60.dp), strokeWidth = 5.dp)
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text("Finalizing...", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("Syncing high-res photo to cloud", color = Color.Gray)
                     }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(text = frame.displayName, style = MaterialTheme.typography.labelMedium, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray, maxLines = 1)
     }
 }
 
+// --- HELPER COMPONENTS ---
 @Composable
 fun ProcessingState() {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.loading_anim))
+        val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.loading_anim)) // Pastikan ada animasinya
         LottieAnimation(composition = composition, iterations = LottieConstants.IterateForever, modifier = Modifier.size(180.dp))
         Spacer(modifier = Modifier.height(16.dp))
-        Text("Mixing Pixels...", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        Text("Developing Photo...", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -323,6 +340,7 @@ fun ErrorState(msg: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(64.dp))
         Spacer(modifier = Modifier.height(16.dp))
-        Text(msg, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyLarge)
+        Text("Oops!", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(msg, color = MaterialTheme.colorScheme.error)
     }
 }
