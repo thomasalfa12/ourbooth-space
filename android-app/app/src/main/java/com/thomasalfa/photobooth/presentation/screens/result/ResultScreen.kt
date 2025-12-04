@@ -36,6 +36,7 @@ import com.thomasalfa.photobooth.data.database.FrameEntity
 import com.thomasalfa.photobooth.utils.PhotoPrintAdapter
 import com.thomasalfa.photobooth.utils.SupabaseManager
 import com.thomasalfa.photobooth.utils.layout.LayoutProcessor
+import com.thomasalfa.photobooth.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -49,7 +50,7 @@ fun ResultScreen(
     selectedFrame: FrameEntity, // Frame yang sudah dipilih di awal (FIXED)
     sessionUuid: String,
     onRetake: () -> Unit,
-    onFinishClicked: (String) -> Unit // Mengirim URL QR Final
+    onFinishClicked: (String, String) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -58,7 +59,7 @@ fun ResultScreen(
     var finalLayoutPath by remember { mutableStateOf<String?>(null) }
 
     // UI States
-    var isGeneratingLayout by remember { mutableStateOf(true) } // Default true karena langsung proses pas masuk
+    var isGeneratingLayout by remember { mutableStateOf(true) } // Default true karena langsung proses
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // UPLOAD STATES (Smart Background Process)
@@ -78,23 +79,30 @@ fun ResultScreen(
 
             try {
                 // A. GENERATE HIGH-RES LAYOUT
-                val options = BitmapFactory.Options().apply { inSampleSize = 2 } // Optimasi memori sedikit
-                photoBitmaps = photoPaths.mapNotNull { path -> BitmapFactory.decodeFile(path, options) }
+                // [FIX] HAPUS downsampling. Decode Full Resolution untuk kualitas cetak maksimal.
+                photoBitmaps = photoPaths.mapNotNull { path ->
+                    BitmapFactory.decodeFile(path)
+                }
 
                 if (photoBitmaps.isNotEmpty()) {
+                    // Load Frame juga Full Resolution
                     frameBitmap = BitmapFactory.decodeFile(selectedFrame.imagePath)
 
                     if (frameBitmap != null) {
+                        // Proses Layout (Pastikan LayoutProcessor sudah menggunakan SCALE_FACTOR = 2f)
                         val resultBitmap = LayoutProcessor.processLayout(
                             photos = photoBitmaps,
                             layoutType = selectedFrame.layoutType,
                             frameBitmap = frameBitmap
                         )
 
-                        // Save Final File
+                        // Save Final File High Quality
                         val file = File(context.cacheDir, "final_${System.currentTimeMillis()}.jpg")
                         val stream = FileOutputStream(file)
+
+                        // Kompresi 100% (Maximum Quality) untuk Print
                         resultBitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
+
                         stream.flush()
                         stream.close()
 
@@ -105,7 +113,6 @@ fun ResultScreen(
                         }
 
                         // B. BACKGROUND UPLOAD (Fire & Forget)
-                        // Langsung upload file yang baru saja digenerate
                         val uploadedLink = SupabaseManager.uploadFile(file)
 
                         if (uploadedLink != null) {
@@ -127,6 +134,7 @@ fun ResultScreen(
                     isUploading = false
                 }
             } finally {
+                // Cleanup Memory Penting!
                 photoBitmaps.forEach { it.recycle() }
                 frameBitmap?.recycle()
             }
@@ -135,24 +143,24 @@ fun ResultScreen(
 
     // --- FUNCTION: HANDLE FINISH ---
     fun executeFinish() {
-        if (uploadedUrl != null) {
+        if (uploadedUrl != null && finalLayoutPath != null ) {
             // BEST CASE: Upload sudah selesai duluan di background
             val finalQrUrl = "https://ourbooth-space.vercel.app/?id=$sessionUuid"
-            onFinishClicked(finalQrUrl)
+            onFinishClicked(finalQrUrl, finalLayoutPath!!)
         } else {
-            // WORST CASE: Internet lambat, upload belum beres
+            // WORST CASE: Internet lambat, upload belum beres -> Tampilkan Overlay
             showFinalizingOverlay = true
 
             scope.launch(Dispatchers.IO) {
-                // Tunggu sebentar (polling)
+                // Tunggu sebentar (polling) siapa tau lagi jalan
                 var attempt = 0
-                while (uploadedUrl == null && attempt < 20) { // Max 10 detik
+                while (uploadedUrl == null && attempt < 20) { // Max wait 10 detik
                     delay(500)
                     if (uploadedUrl != null) break
                     attempt++
                 }
 
-                // Jika masih gagal background, coba paksa upload ulang
+                // Jika masih null (gagal background), coba upload paksa ulang sekarang
                 if (uploadedUrl == null && finalLayoutPath != null) {
                     try {
                         val file = File(finalLayoutPath!!)
@@ -170,9 +178,9 @@ fun ResultScreen(
                     showFinalizingOverlay = false
                     if (uploadedUrl != null) {
                         val finalQrUrl = "https://ourbooth-space.vercel.app/?id=$sessionUuid"
-                        onFinishClicked(finalQrUrl)
+                        onFinishClicked(finalQrUrl, finalLayoutPath!!)
                     } else {
-                        errorMessage = "Upload Failed. Check Internet."
+                        errorMessage = "Upload Failed. Check Internet Connection."
                     }
                 }
             }
@@ -182,15 +190,19 @@ fun ResultScreen(
     // --- FUNCTION: PRINT ---
     fun handlePrint() {
         finalLayoutPath?.let { path ->
+            // Decode Full Res untuk dikirim ke Printer
             val bitmap = BitmapFactory.decodeFile(path) ?: return
             val printManager = context.getSystemService(Context.PRINT_SERVICE) as PrintManager
             val jobName = "Kubik_Print_${System.currentTimeMillis()}"
+
+            // Konfigurasi Kertas 4R Borderless
             val attributes = PrintAttributes.Builder()
                 .setMediaSize(PrintAttributes.MediaSize.NA_INDEX_4X6)
                 .setResolution(PrintAttributes.Resolution("id", "Epson", 300, 300))
                 .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
                 .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
                 .build()
+
             printManager.print(jobName, PhotoPrintAdapter(context, bitmap, jobName), attributes)
         }
     }
@@ -221,18 +233,19 @@ fun ResultScreen(
                                         modifier = Modifier.fillMaxSize().padding(16.dp).clip(RoundedCornerShape(16.dp)),
                                         contentScale = ContentScale.Fit
                                     )
-                                    // Indikator Upload Kecil (UX: Biar user tau sistem sedang bekerja)
+
+                                    // Indikator Upload Kecil (UX: Biar user tau sistem sedang bekerja di background)
                                     if (isUploading) {
                                         Surface(
                                             modifier = Modifier.align(Alignment.TopEnd).padding(24.dp),
                                             shape = RoundedCornerShape(20.dp),
-                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
                                             shadowElevation = 4.dp
                                         ) {
                                             Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = NeoPurple)
                                                 Spacer(modifier = Modifier.width(8.dp))
-                                                Text("Cloud Sync...", style = MaterialTheme.typography.labelSmall)
+                                                Text("Cloud Sync...", style = MaterialTheme.typography.labelSmall, color = NeoBlack)
                                             }
                                         }
                                     }
@@ -242,38 +255,41 @@ fun ResultScreen(
                     }
                 }
 
-                // KANAN: ACTION PANEL (Simpel, Tanpa Frame Selector)
+                // KANAN: ACTION PANEL
                 Column(
                     modifier = Modifier.weight(0.7f).fillMaxHeight(),
                     verticalArrangement = Arrangement.Center
                 ) {
                     Text("MEMORIES READY!", style = MaterialTheme.typography.labelLarge, color = Color.Gray, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
-                    Text("Print or Share?", style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.Black)
+                    Text("Print or Share?", style = MaterialTheme.typography.displaySmall, color = NeoBlack, fontWeight = FontWeight.Black)
 
                     Spacer(modifier = Modifier.height(32.dp))
 
                     // ACTION BUTTONS
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
 
-                        // 1. PRINT BUTTON
+                        // 1. PRINT BUTTON (Outlined)
                         OutlinedButton(
                             onClick = { handlePrint() },
                             modifier = Modifier.fillMaxWidth().height(64.dp),
                             shape = RoundedCornerShape(18.dp),
-                            enabled = finalLayoutPath != null && !isGeneratingLayout
+                            enabled = finalLayoutPath != null && !isGeneratingLayout,
+                            border = androidx.compose.foundation.BorderStroke(2.dp, NeoPurple),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NeoPurple)
                         ) {
                             Icon(Icons.Filled.Print, null)
                             Spacer(modifier = Modifier.width(12.dp))
                             Text("PRINT PHOTO", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         }
 
-                        // 2. FINISH BUTTON (Primary)
+                        // 2. FINISH BUTTON (Primary Filled)
                         Button(
                             onClick = { executeFinish() },
                             modifier = Modifier.fillMaxWidth().height(80.dp),
                             shape = RoundedCornerShape(24.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            enabled = finalLayoutPath != null && !isGeneratingLayout
+                            colors = ButtonDefaults.buttonColors(containerColor = NeoGreen),
+                            enabled = finalLayoutPath != null && !isGeneratingLayout,
+                            elevation = ButtonDefaults.buttonElevation(8.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.QrCode, null, modifier = Modifier.size(32.dp))
@@ -281,7 +297,7 @@ fun ResultScreen(
                                 Column {
                                     Text("GET QR CODE", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                                     val statusText = if (uploadedUrl != null) "Ready to Scan" else if (isUploading) "Uploading..." else "Process & Finish"
-                                    Text(statusText, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.8f))
+                                    Text(statusText, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.9f))
                                 }
                             }
                         }
@@ -290,14 +306,14 @@ fun ResultScreen(
 
                         // 3. RETAKE BUTTON
                         TextButton(onClick = onRetake, modifier = Modifier.fillMaxWidth()) {
-                            Text("Start Over (Delete All)", color = MaterialTheme.colorScheme.error)
+                            Text("Start Over (Delete All)", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
         }
 
-        // --- FINALIZING OVERLAY (Blocker) ---
+        // --- FINALIZING OVERLAY (Blocker jika upload lambat) ---
         AnimatedVisibility(
             visible = showFinalizingOverlay,
             enter = fadeIn(),
@@ -313,9 +329,9 @@ fun ResultScreen(
             ) {
                 Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(24.dp)) {
                     Column(modifier = Modifier.padding(40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(modifier = Modifier.size(60.dp), strokeWidth = 5.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(60.dp), strokeWidth = 5.dp, color = NeoPurple)
                         Spacer(modifier = Modifier.height(24.dp))
-                        Text("Finalizing...", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("Finalizing...", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = NeoPurple)
                         Text("Syncing high-res photo to cloud", color = Color.Gray)
                     }
                 }
@@ -328,10 +344,10 @@ fun ResultScreen(
 @Composable
 fun ProcessingState() {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.loading_anim)) // Pastikan ada animasinya
+        val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.loading_anim)) // Pastikan file ini ada
         LottieAnimation(composition = composition, iterations = LottieConstants.IterateForever, modifier = Modifier.size(180.dp))
         Spacer(modifier = Modifier.height(16.dp))
-        Text("Developing Photo...", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        Text("Developing Photo...", style = MaterialTheme.typography.headlineSmall, color = NeoPurple, fontWeight = FontWeight.Bold)
     }
 }
 

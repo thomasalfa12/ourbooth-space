@@ -24,6 +24,11 @@ class SettingsManager(private val context: Context) {
 
         // --- SETTING BARU (Pindahkan ke sini biar rapi) ---
         val ACTIVE_EVENT = stringPreferencesKey("active_event")
+
+        val DEVICE_ID = stringPreferencesKey("auth_device_id")
+        val DEVICE_NAME = stringPreferencesKey("auth_device_name")
+        val DEVICE_TYPE = stringPreferencesKey("auth_device_type") // 'RENTAL' atau 'VENDING'
+        val IS_LOGGED_IN = booleanPreferencesKey("auth_is_logged_in")
     }
 
     // --- FLOWS (Baca Data) ---
@@ -39,6 +44,29 @@ class SettingsManager(private val context: Context) {
     // Logic Active Event (Default "ALL")
     val activeEventFlow: Flow<String> = context.dataStore.data
         .map { preferences -> preferences[ACTIVE_EVENT] ?: "ALL" }
+
+    val deviceIdFlow: Flow<String?> = context.dataStore.data.map { it[DEVICE_ID] }
+    val deviceNameFlow: Flow<String> = context.dataStore.data.map { it[DEVICE_NAME] ?: "Unknown Device" }
+    val deviceTypeFlow: Flow<String> = context.dataStore.data.map { it[DEVICE_TYPE] ?: "RENTAL" }
+    val isLoggedInFlow: Flow<Boolean> = context.dataStore.data.map { it[IS_LOGGED_IN] ?: false }
+
+
+    suspend fun saveLoginSession(id: String, name: String, type: String) {
+        context.dataStore.edit {
+            it[DEVICE_ID] = id
+            it[DEVICE_NAME] = name
+            it[DEVICE_TYPE] = type
+            it[IS_LOGGED_IN] = true
+        }
+    }
+
+    suspend fun logout() {
+        context.dataStore.edit {
+            it[IS_LOGGED_IN] = false
+            it[DEVICE_ID] = ""
+            // Kita tidak perlu hapus data lain agar setup lebih cepat kalau login ulang
+        }
+    }
 
     // --- SAVE FUNCTIONS ---
     suspend fun saveFramePath(path: String) {
