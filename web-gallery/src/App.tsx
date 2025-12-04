@@ -11,6 +11,7 @@ import {
 import { supabase } from "./lib/supabase";
 import { Loader2 } from "lucide-react";
 import { useUserRole } from "./hooks/useUserRole"; // [NEW]
+import { Analytics } from "@vercel/analytics/react";
 
 // Pages
 import Login from "./pages/Login";
@@ -113,6 +114,7 @@ function App() {
           }
         />
       </Routes>
+      <Analytics />
     </BrowserRouter>
   );
 }

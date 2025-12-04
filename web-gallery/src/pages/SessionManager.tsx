@@ -226,7 +226,7 @@ export default function SessionManager() {
           <div className="flex bg-gray-100 rounded-lg p-0.5 relative">
             <motion.div
               className="absolute inset-y-0.5 bg-white rounded-md shadow-sm"
-              layoutId="viewModePill"
+              layoutId="sessionViewModePill"
               initial={false}
               animate={{
                 x: viewMode === "table" ? 0 : "100%",
@@ -326,265 +326,256 @@ export default function SessionManager() {
       </div>
 
       {/* 3. CONTENT AREA */}
-      <AnimatePresence mode="wait">
-        {filteredSessions.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex flex-col items-center justify-center py-20 bg-white rounded-2xl border border-dashed border-gray-200"
-          >
-            <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
-              <Search className="text-gray-300" size={32} />
-            </div>
-            <h3 className="text-lg font-bold text-kubik-black">
-              No sessions found
-            </h3>
-            <p className="text-kubik-grey text-sm">
-              Try adjusting your filters or search terms.
-            </p>
-          </motion.div>
-        ) : (
-          <motion.div
-            key={viewMode}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
-          >
-            {viewMode === "table" ? (
-              // --- TABLE VIEW ---
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-gray-50/50 text-kubik-grey font-semibold uppercase text-[11px] tracking-wider border-b border-gray-100">
-                    <tr>
-                      <th className="w-12 px-6 py-4">
-                        <input
-                          type="checkbox"
-                          className="rounded border-gray-300 text-kubik-blue focus:ring-kubik-blue"
-                          checked={
-                            selectedSessions.length ===
-                              filteredSessions.length &&
-                            filteredSessions.length > 0
-                          }
-                          onChange={handleSelectAll}
-                        />
-                      </th>
-                      <th className="px-6 py-4">Preview</th>
-                      <th className="px-6 py-4">Session Info</th>
-                      <th className="px-6 py-4">Status</th>
-                      <th className="px-6 py-4">Device</th>
-                      <th className="px-6 py-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {filteredSessions.map((session) => {
-                      const status = getSessionStatus(session);
-                      const isSelected = selectedSessions.includes(session.id);
-                      return (
-                        <tr
-                          key={session.id}
-                          className={cn(
-                            "group transition-colors",
-                            isSelected ? "bg-blue-50/50" : "hover:bg-gray-50/50"
-                          )}
-                        >
-                          <td className="px-6 py-4">
-                            <input
-                              type="checkbox"
-                              className="rounded border-gray-300 text-kubik-blue focus:ring-kubik-blue cursor-pointer"
-                              checked={isSelected}
-                              onChange={() => handleSelect(session.id)}
-                            />
-                          </td>
-                          <td className="px-6 py-4">
-                            <div
-                              className="w-16 h-12 bg-gray-100 rounded-lg border border-gray-200 overflow-hidden relative cursor-pointer"
-                              onClick={() =>
-                                window.open(
-                                  `/session/${session.session_uuid}`,
-                                  "_blank"
-                                )
-                              }
-                            >
-                              {session.final_photo_url ? (
-                                <img
-                                  src={session.final_photo_url}
-                                  className="w-full h-full object-cover"
-                                  alt="Thumb"
-                                  loading="lazy"
-                                />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-gray-300">
-                                  <ImageIcon size={16} />
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <p className="font-mono text-xs font-bold text-kubik-black">
-                              {session.session_uuid.substring(0, 8)}...
-                            </p>
-                            <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-1">
-                              <Calendar size={10} />
-                              {new Date(
-                                session.created_at
-                              ).toLocaleDateString()}
-                              <span className="w-0.5 h-0.5 bg-gray-300 rounded-full" />
-                              {new Date(session.created_at).toLocaleTimeString(
-                                [],
-                                { hour: "2-digit", minute: "2-digit" }
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "text-[10px] font-bold border rounded-full px-2.5 py-0.5",
-                                status.color
-                              )}
-                            >
-                              <span
-                                className={cn(
-                                  "w-1.5 h-1.5 rounded-full mr-1.5",
-                                  status.dot
-                                )}
-                              />
-                              {status.label}
-                            </Badge>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-md w-fit">
-                              <Smartphone size={12} />
-                              {session.device_id
-                                ? session.device_id.substring(0, 6)
-                                : "UNK"}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-gray-400 hover:text-kubik-black"
-                                >
-                                  <MoreHorizontal size={16} />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  onClick={() =>
-                                    navigate(`/session/${session.session_uuid}`)
-                                  }
-                                >
-                                  <ExternalLink className="mr-2 h-4 w-4" /> View
-                                  Details
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => handleDelete([session.id])}
-                                  className="text-red-600 focus:text-red-600 focus:bg-red-50"
-                                >
-                                  <Trash2 className="mr-2 h-4 w-4" /> Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              // --- GRID VIEW ---
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {filteredSessions.map((session) => {
-                  const isSelected = selectedSessions.includes(session.id);
-                  const status = getSessionStatus(session);
-
-                  return (
-                    <motion.div
-                      layout
-                      key={session.id}
-                      className={cn(
-                        "group relative bg-white rounded-2xl border transition-all duration-200 overflow-hidden cursor-pointer",
-                        isSelected
-                          ? "ring-2 ring-kubik-blue border-transparent shadow-md"
-                          : "border-gray-100 shadow-sm hover:shadow-lg hover:-translate-y-1"
-                      )}
-                      onClick={() =>
-                        navigate(`/session/${session.session_uuid}`)
-                      }
-                    >
-                      {/* Selection Overlay Checkbox */}
-                      <div
-                        className="absolute top-3 left-3 z-20"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <input
-                          type="checkbox"
-                          className="w-5 h-5 rounded border-white/50 bg-black/20 text-kubik-blue focus:ring-kubik-blue checked:bg-kubik-blue checked:border-transparent backdrop-blur-sm cursor-pointer transition-all"
-                          checked={isSelected}
-                          onChange={() => handleSelect(session.id)}
-                        />
-                      </div>
-
-                      {/* Status Badge */}
-                      <div className="absolute top-3 right-3 z-20">
-                        <span
-                          className={cn(
-                            "w-2.5 h-2.5 rounded-full block border border-white/20 shadow-sm",
-                            status.dot
-                          )}
-                          title={status.label}
-                        />
-                      </div>
-
-                      {/* Image Area - FIXED: canonical aspect-4/3 and bg-linear-to-t */}
-                      <div className="aspect-4/3 bg-gray-100 relative overflow-hidden">
-                        {session.final_photo_url ? (
-                          <img
-                            src={session.final_photo_url}
-                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-gray-300">
-                            <ImageIcon size={32} />
-                          </div>
+      {filteredSessions.length === 0 ? (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col items-center justify-center py-20 bg-white rounded-2xl border border-dashed border-gray-200"
+        >
+          <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
+            <Search className="text-gray-300" size={32} />
+          </div>
+          <h3 className="text-lg font-bold text-kubik-black">
+            No sessions found
+          </h3>
+          <p className="text-kubik-grey text-sm">
+            Try adjusting your filters or search terms.
+          </p>
+        </motion.div>
+      ) : (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          {viewMode === "table" ? (
+            // --- TABLE VIEW ---
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-gray-50/50 text-kubik-grey font-semibold uppercase text-[11px] tracking-wider border-b border-gray-100">
+                  <tr>
+                    <th className="w-12 px-6 py-4">
+                      <input
+                        type="checkbox"
+                        className="rounded border-gray-300 text-kubik-blue focus:ring-kubik-blue"
+                        checked={
+                          selectedSessions.length === filteredSessions.length &&
+                          filteredSessions.length > 0
+                        }
+                        onChange={handleSelectAll}
+                      />
+                    </th>
+                    <th className="px-6 py-4">Preview</th>
+                    <th className="px-6 py-4">Session Info</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4">Device</th>
+                    <th className="px-6 py-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {filteredSessions.map((session) => {
+                    const status = getSessionStatus(session);
+                    const isSelected = selectedSessions.includes(session.id);
+                    return (
+                      <tr
+                        key={session.id}
+                        className={cn(
+                          "group transition-colors",
+                          isSelected ? "bg-blue-50/50" : "hover:bg-gray-50/50"
                         )}
-                        <div className="absolute inset-0 bg-linear-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-4">
-                          <p className="text-white text-xs font-medium flex items-center gap-1">
-                            <ExternalLink size={12} /> View Session
+                      >
+                        <td className="px-6 py-4">
+                          <input
+                            type="checkbox"
+                            className="rounded border-gray-300 text-kubik-blue focus:ring-kubik-blue cursor-pointer"
+                            checked={isSelected}
+                            onChange={() => handleSelect(session.id)}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <div
+                            className="w-16 h-12 bg-gray-100 rounded-lg border border-gray-200 overflow-hidden relative cursor-pointer"
+                            onClick={() =>
+                              window.open(
+                                `/session/${session.session_uuid}`,
+                                "_blank"
+                              )
+                            }
+                          >
+                            {session.final_photo_url ? (
+                              <img
+                                src={session.final_photo_url}
+                                className="w-full h-full object-cover"
+                                alt="Thumb"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-gray-300">
+                                <ImageIcon size={16} />
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <p className="font-mono text-xs font-bold text-kubik-black">
+                            {session.session_uuid.substring(0, 8)}...
                           </p>
-                        </div>
-                      </div>
-
-                      {/* Footer Info */}
-                      <div className="p-4">
-                        <p className="font-mono text-xs font-bold text-kubik-black truncate">
-                          {session.session_uuid}
-                        </p>
-                        <p className="text-[10px] text-gray-400 mt-1 flex justify-between">
-                          <span>
+                          <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-1">
+                            <Calendar size={10} />
                             {new Date(session.created_at).toLocaleDateString()}
-                          </span>
-                          <span>
+                            <span className="w-0.5 h-0.5 bg-gray-300 rounded-full" />
+                            {new Date(session.created_at).toLocaleTimeString(
+                              [],
+                              { hour: "2-digit", minute: "2-digit" }
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] font-bold border rounded-full px-2.5 py-0.5",
+                              status.color
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "w-1.5 h-1.5 rounded-full mr-1.5",
+                                status.dot
+                              )}
+                            />
+                            {status.label}
+                          </Badge>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-md w-fit">
+                            <Smartphone size={12} />
                             {session.device_id
-                              ? session.device_id.substring(0, 4)
+                              ? session.device_id.substring(0, 6)
                               : "UNK"}
-                          </span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-gray-400 hover:text-kubik-black"
+                              >
+                                <MoreHorizontal size={16} />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  navigate(`/session/${session.session_uuid}`)
+                                }
+                              >
+                                <ExternalLink className="mr-2 h-4 w-4" /> View
+                                Details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleDelete([session.id])}
+                                className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" /> Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            // --- GRID VIEW ---
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {filteredSessions.map((session) => {
+                const isSelected = selectedSessions.includes(session.id);
+                const status = getSessionStatus(session);
+
+                return (
+                  <motion.div
+                    layout
+                    key={session.id}
+                    className={cn(
+                      "group relative bg-white rounded-2xl border transition-all duration-200 overflow-hidden cursor-pointer",
+                      isSelected
+                        ? "ring-2 ring-kubik-blue border-transparent shadow-md"
+                        : "border-gray-100 shadow-sm hover:shadow-lg hover:-translate-y-1"
+                    )}
+                    onClick={() => navigate(`/session/${session.session_uuid}`)}
+                  >
+                    {/* Selection Overlay Checkbox */}
+                    <div
+                      className="absolute top-3 left-3 z-20"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        className="w-5 h-5 rounded border-white/50 bg-black/20 text-kubik-blue focus:ring-kubik-blue checked:bg-kubik-blue checked:border-transparent backdrop-blur-sm cursor-pointer transition-all"
+                        checked={isSelected}
+                        onChange={() => handleSelect(session.id)}
+                      />
+                    </div>
+
+                    {/* Status Badge */}
+                    <div className="absolute top-3 right-3 z-20">
+                      <span
+                        className={cn(
+                          "w-2.5 h-2.5 rounded-full block border border-white/20 shadow-sm",
+                          status.dot
+                        )}
+                        title={status.label}
+                      />
+                    </div>
+
+                    {/* Image Area - FIXED: canonical aspect-4/3 and bg-linear-to-t */}
+                    <div className="aspect-4/3 bg-gray-100 relative overflow-hidden">
+                      {session.final_photo_url ? (
+                        <img
+                          src={session.final_photo_url}
+                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-300">
+                          <ImageIcon size={32} />
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-linear-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-4">
+                        <p className="text-white text-xs font-medium flex items-center gap-1">
+                          <ExternalLink size={12} /> View Session
                         </p>
                       </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+                    </div>
+
+                    {/* Footer Info */}
+                    <div className="p-4">
+                      <p className="font-mono text-xs font-bold text-kubik-black truncate">
+                        {session.session_uuid}
+                      </p>
+                      <p className="text-[10px] text-gray-400 mt-1 flex justify-between">
+                        <span>
+                          {new Date(session.created_at).toLocaleDateString()}
+                        </span>
+                        <span>
+                          {session.device_id
+                            ? session.device_id.substring(0, 4)
+                            : "UNK"}
+                        </span>
+                      </p>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+        </motion.div>
+      )}
 
       {/* 4. CONTEXTUAL FLOATING ACTION BAR */}
       <AnimatePresence>
