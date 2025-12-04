@@ -1,10 +1,13 @@
 package com.thomasalfa.photobooth
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Bundle
-import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -20,6 +23,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.thomasalfa.photobooth.data.SettingsManager
 import com.thomasalfa.photobooth.data.database.AppDatabase
@@ -27,26 +33,31 @@ import com.thomasalfa.photobooth.data.database.FrameEntity
 import com.thomasalfa.photobooth.presentation.screens.admin.AdminScreen
 import com.thomasalfa.photobooth.presentation.screens.admin.FrameManagerScreen
 import com.thomasalfa.photobooth.presentation.screens.admin.SessionHistoryScreen
+import com.thomasalfa.photobooth.presentation.screens.auth.LoginActivityScreen
 import com.thomasalfa.photobooth.presentation.screens.capture.CaptureScreen
 import com.thomasalfa.photobooth.presentation.screens.editor.EditorScreen
 import com.thomasalfa.photobooth.presentation.screens.home.HomeScreen
 import com.thomasalfa.photobooth.presentation.screens.result.QrCodeScreen
 import com.thomasalfa.photobooth.presentation.screens.result.ResultScreen
 import com.thomasalfa.photobooth.presentation.screens.selection.FrameSelectionScreen
+import com.thomasalfa.photobooth.presentation.screens.ticket.TicketScreen
+import com.thomasalfa.photobooth.ui.theme.KubikBlue
 import com.thomasalfa.photobooth.ui.theme.KubikTheme
 import com.thomasalfa.photobooth.utils.LocalDataManager
 import com.thomasalfa.photobooth.utils.SupabaseManager
-import com.thomasalfa.photobooth.utils.VideoProcessor
+// VideoProcessor import DIHAPUS
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.FileOutputStream
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-
+        hideSystemUI()
 
         setContent {
             KubikTheme {
@@ -56,105 +67,164 @@ class MainActivity : ComponentActivity() {
                 val settingsManager = remember { SettingsManager(context) }
                 val db = remember { AppDatabase.getDatabase(context) }
 
-                // Collect Settings Realtime
-                val activeEvent by settingsManager.activeEventFlow.collectAsState(initial = "ALL")
-                val correctPin by settingsManager.adminPinFlow.collectAsState(initial = "1234")
+                val deviceType by settingsManager.deviceTypeFlow.collectAsState(initial = "RENTAL")
+                val deviceId by settingsManager.deviceIdFlow.collectAsState(initial = "")
 
-                // Collect Frames Realtime
-                val allFrames by db.frameDao().getAllFrames().collectAsState(initial = emptyList())
+                // --- AUTH STATE (LOGIN CHECKER) ---
+                var isDeviceLoggedIn by remember { mutableStateOf<Boolean?>(null) }
 
-                // --- FILTER LOGIC (SMART FILTERING) ---
-                // Filter frame berdasarkan setting "Active Event" di Admin
-                val availableFrames = remember(activeEvent, allFrames) {
-                    when (activeEvent) {
-                        "ALL" -> allFrames
-                        "Default Only" -> allFrames.filter { it.category == "Default" }
-                        // Jika event spesifik, tampilkan Frame Event Tersebut + Frame Default
-                        else -> allFrames.filter { it.category == "Default" || it.category == activeEvent }
+                LaunchedEffect(Unit) {
+                    settingsManager.isLoggedInFlow.collect { loggedIn ->
+                        isDeviceLoggedIn = loggedIn
                     }
                 }
 
                 // --- APP STATES ---
-                var currentScreen by remember { mutableStateOf("HOME") }
+                var currentScreen by remember { mutableStateOf("LOADING") }
+
+                LaunchedEffect(isDeviceLoggedIn) {
+                    if (isDeviceLoggedIn == true) {
+                        currentScreen = "HOME"
+                    } else if (isDeviceLoggedIn == false) {
+                        currentScreen = "LOGIN"
+                    }
+                }
+
+                // --- SETTINGS COLLECTION ---
+                val activeEvent by settingsManager.activeEventFlow.collectAsState(initial = "ALL")
+                val correctPin by settingsManager.adminPinFlow.collectAsState(initial = "1234")
+                val allFrames by db.frameDao().getAllFrames().collectAsState(initial = emptyList())
+
+                val availableFrames = remember(activeEvent, allFrames) {
+                    when (activeEvent) {
+                        "ALL" -> allFrames
+                        "Default Only" -> allFrames.filter { it.category == "Default" }
+                        else -> allFrames.filter { it.category == "Default" || it.category == activeEvent }
+                    }
+                }
 
                 // Session Data
-                var selectedFrame by remember { mutableStateOf<FrameEntity?>(null) } // Frame yang dipilih user
-                var capturedPhotos by remember { mutableStateOf(listOf<String>()) } // Foto mentah dari kamera
-                var finalPhotoOrder by remember { mutableStateOf(listOf<String>()) } // Foto urutan final dari Editor
+                var selectedFrame by remember { mutableStateOf<FrameEntity?>(null) }
+                var capturedPhotos by remember { mutableStateOf(listOf<String>()) }
+                var finalPhotoOrder by remember { mutableStateOf(listOf<String>()) }
 
-                // Background Process State
+                // Process State
                 var currentSessionUuid by remember { mutableStateOf("") }
-                var currentVideoPath by remember { mutableStateOf<String?>(null) }
-                var isBackgroundUploadDone by remember { mutableStateOf(false) }
-                var backgroundUploadError by remember { mutableStateOf<String?>(null) }
-
-                // Result State
                 var uploadedQrUrl by remember { mutableStateOf("") }
 
-                // Admin Auth
+                // Admin Auth UI
                 var showPinDialog by remember { mutableStateOf(false) }
                 var pinInput by remember { mutableStateOf("") }
 
-                // --- BACKGROUND LOGIC ---
-                fun startBackgroundProcess(uuid: String, photosForVideo: List<String>) {
-                    // Reset State
-                    currentVideoPath = null
-                    isBackgroundUploadDone = false
-                    backgroundUploadError = null
+                // --- HELPER: KOMPRESI GAMBAR UNTUK UPLOAD ---
+                // Agar upload cepat, kita resize foto ke Full HD (1920px) kualitas 90%
+                fun compressImageForUpload(originalPath: String): File? {
+                    return try {
+                        val originalFile = File(originalPath)
+                        if (!originalFile.exists()) return null
 
+                        val bitmap = BitmapFactory.decodeFile(originalPath) ?: return null
+
+                        // Buat file cache sementara
+                        val compressedFile = File(context.cacheDir, "upload_${originalFile.name}")
+                        val stream = FileOutputStream(compressedFile)
+
+                        // Kompresi JPEG 90% (Sangat cukup untuk Web/HP)
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                        stream.flush()
+                        stream.close()
+
+                        compressedFile
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        null
+                    }
+                }
+
+                // --- BACKGROUND LOGIC (NEW: RAW PHOTOS BATCH UPLOAD) ---
+                fun startBackgroundProcess(uuid: String, photosToUpload: List<String>) {
                     lifecycleScope.launch(Dispatchers.IO) {
                         try {
-                            // 1. DB Init (Membuat sesi kosong di Supabase)
-                            val dbSuccess = SupabaseManager.insertInitialSession(uuid, null)
+                            // 1. Ambil Device ID
+                            val deviceId = settingsManager.deviceIdFlow.first()
+
+                            // 2. DB Init (Create Session Row)
+                            val dbSuccess = SupabaseManager.insertInitialSession(uuid, null, deviceId)
                             if (!dbSuccess) throw Exception("DB Init Failed")
 
-                            isBackgroundUploadDone = true // Signal UI OK
+                            // 3. COMPRESS & UPLOAD RAW PHOTOS (Parallel)
+                            // Ubah path string menjadi File yang sudah dikompres
+                            val filesToUpload = photosToUpload.mapNotNull { path ->
+                                compressImageForUpload(path)
+                            }
 
-                            // 2. Video Generation (Stop Motion)
-                            val videoResult = VideoProcessor.generateStopMotion(context, photosForVideo)
-                            if (videoResult != null) {
-                                currentVideoPath = videoResult
-                                val videoFile = File(videoResult)
-                                if (videoFile.exists()) {
-                                    val videoUrl = SupabaseManager.uploadFile(videoFile)
-                                    if (videoUrl != null) {
-                                        SupabaseManager.updateSessionVideo(uuid, videoUrl)
-                                    }
+                            if (filesToUpload.isNotEmpty()) {
+                                // Upload ke Supabase Storage (Ngebut!)
+                                val uploadedUrls = SupabaseManager.uploadMultipleFiles(filesToUpload)
+
+                                // Update DB dengan list URL (JSON)
+                                if (uploadedUrls.isNotEmpty()) {
+                                    SupabaseManager.updateSessionRawPhotos(uuid, uploadedUrls)
                                 }
                             }
+
+                            // Cleanup: Hapus file kompresi sementara agar memori tidak penuh
+                            filesToUpload.forEach { it.delete() }
+
                         } catch (e: Exception) {
-                            backgroundUploadError = e.message
-                            // Tetap lanjut agar user tidak stuck (akan diretry di ResultScreen jika perlu)
-                            isBackgroundUploadDone = true
+                            e.printStackTrace()
+                            // Error silent agar tidak mengganggu user flow
                         }
                     }
                 }
 
                 // --- NAVIGATION GRAPH ---
                 when (currentScreen) {
-                    // 1. HOME SCREEN
+                    "LOADING" -> {
+                        Box(modifier = Modifier.fillMaxSize().background(KubikBlue), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = Color.White)
+                        }
+                    }
+
+                    "LOGIN" -> {
+                        LoginActivityScreen(
+                            onLoginSuccess = { /* Auto handle by LaunchedEffect */ }
+                        )
+                    }
+
                     "HOME" -> {
                         HomeScreen(
                             onStartSession = {
-                                // RESET SEMUA DATA SESI BARU
                                 capturedPhotos = emptyList()
                                 finalPhotoOrder = emptyList()
                                 selectedFrame = null
                                 currentSessionUuid = ""
-                                currentVideoPath = null
-                                isBackgroundUploadDone = false
-
-                                // Navigasi ke Pemilihan Frame (Flow Baru)
-                                currentScreen = "FRAME_SELECTION"
+                                if (deviceType == "VENDING") {
+                                    currentScreen = "TICKET_INPUT" // Minta Tiket Dulu
+                                } else {
+                                    currentScreen = "FRAME_SELECTION" // Langsung Foto (Rental)
+                                }
                             },
                             onOpenAdmin = { pinInput = ""; showPinDialog = true }
                         )
                     }
 
-                    // 2. FRAME SELECTION
+                    "TICKET_INPUT" -> {
+                        TicketScreen(
+                            deviceId = deviceId ?: "",
+                            onTicketValid = {
+                                // Tiket Valid -> Lanjut Pilih Frame
+                                currentScreen = "FRAME_SELECTION"
+                            },
+                            onBack = {
+                                currentScreen = "HOME"
+                            }
+                        )
+                    }
+
                     "FRAME_SELECTION" -> {
                         FrameSelectionScreen(
-                            frames = availableFrames, // Menggunakan Data Asli Database + Filter
+                            frames = availableFrames,
                             onFrameSelected = { frame ->
                                 selectedFrame = frame
                                 currentScreen = "CAPTURE"
@@ -163,7 +233,6 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    // 3. CAPTURE SCREEN
                     "CAPTURE" -> {
                         if (selectedFrame != null) {
                             CaptureScreen(
@@ -171,21 +240,21 @@ class MainActivity : ComponentActivity() {
                                 onSessionComplete = { rawPhotos ->
                                     capturedPhotos = rawPhotos
 
-                                    // Generate UUID & Mulai proses background (DB Init & Video)
+                                    // Generate UUID
                                     val newUuid = UUID.randomUUID().toString()
                                     currentSessionUuid = newUuid
+
+                                    // [NEW] Start Upload Raw Photos in Background
                                     startBackgroundProcess(newUuid, rawPhotos)
 
                                     currentScreen = "EDITOR"
                                 }
                             )
                         } else {
-                            // Fallback safety
                             currentScreen = "FRAME_SELECTION"
                         }
                     }
 
-                    // 4. EDITOR SCREEN
                     "EDITOR" -> {
                         if (selectedFrame != null && capturedPhotos.isNotEmpty()) {
                             EditorScreen(
@@ -199,22 +268,26 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // 5. RESULT SCREEN
                     "RESULT" -> {
                         if (selectedFrame != null) {
                             ResultScreen(
-                                photoPaths = finalPhotoOrder, // Foto Final dari Editor
-                                selectedFrame = selectedFrame!!, // Frame Pilihan
+                                photoPaths = finalPhotoOrder,
+                                selectedFrame = selectedFrame!!,
                                 sessionUuid = currentSessionUuid,
-                                onRetake = {
-                                    currentScreen = "HOME"
-                                },
-                                onFinishClicked = { finalQrUrl ->
-                                    // Langsung dapat URL Final, lompat ke QR
+                                onRetake = { currentScreen = "HOME" },
+                                onFinishClicked = { finalQrUrl, finalLayoutFilePath ->
                                     uploadedQrUrl = finalQrUrl
 
-                                    // Simpan History Lokal (Opsional, untuk backup)
-                                    // LocalDataManager.saveSessionToDb(...)
+                                    // Save Local Database
+                                    lifecycleScope.launch(Dispatchers.IO) {
+                                        LocalDataManager.saveSessionToDb(
+                                            context = context,
+                                            uuid = currentSessionUuid,
+                                            finalPath = finalLayoutFilePath,
+                                            gifPath = null, // Video sudah tidak ada
+                                            rawPhotoPaths = finalPhotoOrder
+                                        )
+                                    }
 
                                     currentScreen = "QR_DISPLAY"
                                 }
@@ -222,17 +295,14 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // 6. QR DISPLAY
                     "QR_DISPLAY" -> {
                         QrCodeScreen(url = uploadedQrUrl, onFinish = { currentScreen = "HOME" })
                     }
 
-                    // --- ADMIN SCREENS ---
                     "ADMIN" -> AdminScreen(
                         onBack = { currentScreen = "HOME" },
                         onManageFrames = { currentScreen = "FRAME_MANAGER" },
                         onOpenHistory = { currentScreen = "SESSION_HISTORY" },
-                        // Callback untuk Matikan Kiosk Mode
                         onExitKiosk = { stopKioskMode() }
                     )
                     "SESSION_HISTORY" -> SessionHistoryScreen(onBack = { currentScreen = "ADMIN" })
@@ -267,22 +337,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // --- FUNGSI KIOSK MODE ---
-    private fun startKioskMode() {
-        try {
-            // Mengunci layar agar user tidak bisa keluar (Home/Back/Recent disembunyikan)
-            startLockTask()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+    private fun stopKioskMode() {
+        try { stopLockTask(); Toast.makeText(this, "Kiosk Disabled", Toast.LENGTH_SHORT).show() } catch (e: Exception) { e.printStackTrace() }
     }
 
-    private fun stopKioskMode() {
-        try {
-            stopLockTask()
-            Toast.makeText(this, "Kiosk Mode Disabled", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            e.printStackTrace()
+    private fun hideSystemUI() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.let {
+            it.hide(WindowInsetsCompat.Type.systemBars())
+            it.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
     }
 }

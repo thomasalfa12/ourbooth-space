@@ -312,7 +312,6 @@ fun SessionDetailDialog(
                     val photoUrl = SupabaseManager.uploadFile(File(finalPath!!))
 
                     if (photoUrl != null) {
-                        SupabaseManager.insertInitialSession(session.sessionUuid, videoUrl)
                         SupabaseManager.updateFinalSession(session.sessionUuid, photoUrl)
 
                         withContext(Dispatchers.Main) {

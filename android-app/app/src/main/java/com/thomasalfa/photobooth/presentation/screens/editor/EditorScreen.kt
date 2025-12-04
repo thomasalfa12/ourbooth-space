@@ -36,13 +36,16 @@ fun EditorScreen(
     selectedFrame: FrameEntity,
     onEditingComplete: (List<String>) -> Unit
 ) {
-    // SINGLE SOURCE OF TRUTH: Urutan Foto (Termasuk cadangan)
+    // SINGLE SOURCE OF TRUTH: Urutan Foto
+    // List ini menampung SEMUA foto (Active + Reserve).
+    // Posisi 0 sampai (SlotSize-1) adalah foto yang akan dicetak.
+    // Posisi sisanya adalah cadangan.
     val currentPhotoOrder = remember { mutableStateListOf<String>().apply { addAll(capturedPhotos) } }
 
     // State: Slot mana di FRAME (Kiri) yang sedang dipilih user?
     var selectedSlotIndex by remember { mutableStateOf<Int?>(null) }
 
-    // Hitung Slot Frame
+    // Hitung Slot Frame (Koordinat Logis)
     val slotDefinitions = remember(selectedFrame) {
         LayoutProcessor.getSlotsForLayout(selectedFrame.layoutType)
     }
@@ -63,31 +66,36 @@ fun EditorScreen(
                 .fillMaxHeight()
                 .padding(16.dp)
         ) {
-            // 1. LOGIC SCALING (Agar frame fit di layar & tidak gepeng)
-            val screenHeight = maxHeight.value
-            val scale = (screenHeight * 0.98f) / LayoutProcessor.CANVAS_HEIGHT
-            val displayWidth = (LayoutProcessor.CANVAS_WIDTH * scale).dp
-            val displayHeight = (LayoutProcessor.CANVAS_HEIGHT * scale).dp
+            // [FIX SCALING] Gunakan Basis Logis (1200x1800), JANGAN pakai ukuran Canvas Fisik
+            // Ini memastikan tampilan UI tetap pas di layar tablet, meskipun resolusi cetak kita naikkan ke 4K/600DPI
+            val LOGICAL_HEIGHT = 1800f
+            val LOGICAL_WIDTH = 1200f
 
-            // 2. WRAPPER ALIGNMENT
+            val screenHeight = maxHeight.value
+            val scale = (screenHeight * 0.96f) / LOGICAL_HEIGHT // 96% tinggi layar
+            val displayWidth = (LOGICAL_WIDTH * scale).dp
+            val displayHeight = (LOGICAL_HEIGHT * scale).dp
+
+            // Wrapper Alignment
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                // 3. FRAME VISUAL CONTAINER
+                // FRAME CONTAINER
                 Box(
                     modifier = Modifier
                         .size(displayWidth, displayHeight)
                         .shadow(24.dp, RoundedCornerShape(4.dp))
                         .background(Color.White)
                 ) {
-                    // A. RENDER FOTO DI SLOT (Active Slots)
-                    // Gunakan 'slotIndex' agar nama variable unik
+                    // A. RENDER FOTO DI SLOT (Active Slots Only)
                     slotDefinitions.forEachIndexed { slotIndex, slotDef ->
+                        // Pastikan ada foto untuk slot ini
                         if (slotIndex < currentPhotoOrder.size) {
                             val photoPath = currentPhotoOrder[slotIndex]
                             val isSelected = selectedSlotIndex == slotIndex
 
+                            // Scaling koordinat logis ke layar
                             val x = (slotDef.x * scale).dp
                             val y = (slotDef.y * scale).dp
                             val w = (slotDef.width * scale).dp
@@ -112,9 +120,11 @@ fun EditorScreen(
                                                 // SWAP INTERNAL (Kiri ke Kiri)
                                                 val fromIndex = selectedSlotIndex!!
                                                 val toIndex = slotIndex
+
                                                 val temp = currentPhotoOrder[fromIndex]
                                                 currentPhotoOrder[fromIndex] = currentPhotoOrder[toIndex]
                                                 currentPhotoOrder[toIndex] = temp
+
                                                 selectedSlotIndex = null
                                             }
                                         }
@@ -127,7 +137,7 @@ fun EditorScreen(
                                     modifier = Modifier.fillMaxSize()
                                 )
 
-                                // Overlay Icon jika sedang dipilih
+                                // Overlay Icon Select
                                 if (isSelected) {
                                     Box(
                                         modifier = Modifier
@@ -147,7 +157,7 @@ fun EditorScreen(
                         }
                     }
 
-                    // B. FRAME OVERLAY IMAGE (PNG Transparan)
+                    // B. FRAME OVERLAY IMAGE
                     AsyncImage(
                         model = File(selectedFrame.imagePath),
                         contentDescription = null,
@@ -161,7 +171,6 @@ fun EditorScreen(
         // =====================================================================
         // BAGIAN KANAN: CONTROL PANEL (50%) - RESERVE POOL + FAB
         // =====================================================================
-        // Gunakan BOX agar kita bisa menaruh FAB melayang di pojok
         Box(
             modifier = Modifier
                 .weight(0.5f)
@@ -173,7 +182,7 @@ fun EditorScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(24.dp), // Padding konten internal
+                    .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // HEADER
@@ -186,7 +195,7 @@ fun EditorScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // INSTRUCTION CARD (Dinamis)
+                // INSTRUCTION CARD
                 val instructionText = if (selectedSlotIndex == null)
                     "Tap a photo on the LEFT to select a slot."
                 else
@@ -219,9 +228,9 @@ fun EditorScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // GRID HEADER
+                // HEADER GRID
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Original Shots", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("All Captures", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Surface(color = Color.LightGray.copy(alpha = 0.3f), shape = RoundedCornerShape(8.dp)) {
                         Text("${currentPhotoOrder.size} photos", modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), fontSize = 12.sp)
                     }
@@ -233,7 +242,6 @@ fun EditorScreen(
                     columns = GridCells.Adaptive(minSize = 110.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
-                    // Padding bawah 88dp agar item paling bawah tidak tertutup tombol FAB
                     contentPadding = PaddingValues(bottom = 88.dp),
                     modifier = Modifier
                         .weight(1f)
@@ -241,9 +249,13 @@ fun EditorScreen(
                         .background(Color(0xFFF5F5F5), RoundedCornerShape(12.dp))
                         .padding(12.dp)
                 ) {
-                    // Gunakan 'photoIndex' agar tidak konflik dengan 'slotIndex'
-                    itemsIndexed(currentPhotoOrder) { photoIndex, path ->
+                    // [KEY FIXED] Gunakan path sebagai key agar UI refresh gambar dengan benar saat swap
+                    itemsIndexed(currentPhotoOrder, key = { _, path -> path }) { photoIndex, path ->
+
+                        // Logic Status Foto
+                        // Foto dianggap "USED" jika indexnya berada dalam jangkauan Slot Frame (0 s/d SlotSize-1)
                         val isInFrame = photoIndex < slotDefinitions.size
+
                         val isSourceSelected = selectedSlotIndex == photoIndex
 
                         val borderWidth by animateDpAsState(
@@ -267,7 +279,7 @@ fun EditorScreen(
                                         val frameIndex = selectedSlotIndex!! // Target (Kiri)
                                         val rawIndex = photoIndex // Source (Kanan)
 
-                                        // Swap Data
+                                        // Swap Data di List
                                         val temp = currentPhotoOrder[frameIndex]
                                         currentPhotoOrder[frameIndex] = currentPhotoOrder[rawIndex]
                                         currentPhotoOrder[rawIndex] = temp
@@ -285,7 +297,7 @@ fun EditorScreen(
                                     .alpha(if(isSourceSelected) 0.5f else 1f)
                             )
 
-                            // Label Status Foto
+                            // Label Status: USED atau CADANGAN (Dot)
                             if (isInFrame) {
                                 Box(
                                     modifier = Modifier
@@ -315,7 +327,7 @@ fun EditorScreen(
             // FLOATING ACTION BUTTON (DONE)
             FloatingActionButton(
                 onClick = {
-                    // Hanya ambil foto yang masuk frame (sesuai jumlah slot)
+                    // Hanya ambil foto yang masuk frame (Active Pool)
                     val finalPhotos = currentPhotoOrder.take(slotDefinitions.size)
                     onEditingComplete(finalPhotos)
                 },
