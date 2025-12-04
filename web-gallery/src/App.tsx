@@ -1,287 +1,119 @@
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useSearchParams,
+  Outlet,
+  useLocation,
+} from "react-router-dom";
+import { supabase } from "./lib/supabase";
+import { Loader2 } from "lucide-react";
+import { useUserRole } from "./hooks/useUserRole"; // [NEW]
 
-// --- TIPE DATA UPDATE ---
-interface SessionData {
-  id: number;
-  created_at: string;
-  session_uuid: string;
-  final_photo_url: string;
-  video_url: string | null; // SUDAH DIGANTI DARI gif_url
-}
+// Pages
+import Login from "./pages/Login";
+import ClientDownload from "./pages/ClientDownload";
+import AdminLayout from "./components/AdminLayout";
+import AdminDashboard from "./pages/AdminDashboard";
+import DeviceManager from "./pages/DeviceManager";
+import SessionDetail from "./pages/SessionDetail";
+import SessionManager from "./pages/SessionManager";
+import TicketStation from "./pages/TicketStation"; // [NEW]
 
-const supabaseUrl = "https://xrbepnwafkbrvyncxqku.supabase.co";
-const supabaseKey =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhyYmVwbndhZmticnZ5bmN4cWt1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3MjAxMjYsImV4cCI6MjA3OTI5NjEyNn0.K1rbpv_Dduroh-_-mMSHQGdI1oClqNMpjl0j-t3ei1k";
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-function App() {
-  const [sessionData, setSessionData] = useState<SessionData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+// --- RBAC GUARD ---
+// Komponen ini memastikan CASHIER tidak bisa akses halaman ADMIN
+function RequireAuth() {
+  const [session, setSession] = useState<boolean | null>(null);
+  const { role, loading: roleLoading } = useUserRole(); // Ambil role
+  const location = useLocation();
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sessionId = params.get("id");
-
-    if (sessionId) {
-      fetchSession(sessionId);
-    } else {
-      setLoading(false);
-      setErrorMsg("No Session ID provided.");
-    }
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => setSession(!!session));
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_, session) => setSession(!!session));
+    return () => subscription.unsubscribe();
   }, []);
 
-  async function fetchSession(uuid: string) {
-    try {
-      const { data, error } = await supabase
-        .from("sessions")
-        .select("*")
-        .eq("session_uuid", uuid)
-        .single();
+  // 1. Loading State
+  if (session === null || roleLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center flex-col gap-4">
+        <Loader2 className="w-10 h-10 text-primary animate-spin" />
+        <p className="text-muted-foreground text-sm font-medium">
+          Verifying Access...
+        </p>
+      </div>
+    );
+  }
 
-      if (error) throw error;
-      setSessionData(data as SessionData);
-    } catch (err) {
-      console.error(err);
-      setErrorMsg("Session not found or link expired.");
-    } finally {
-      setLoading(false);
+  // 2. Not Logged In -> Login Page
+  if (!session) return <Navigate to="/login" replace />;
+
+  // 3. Role Based Redirection (Logic Penting!)
+
+  // Jika CASHIER mencoba akses halaman root admin atau halaman terlarang, lempar ke Ticket Station
+  if (role === "CASHIER") {
+    // Daftar halaman yang BOLEH diakses cashier
+    const allowedPaths = ["/admin/tickets"];
+    const isAllowed = allowedPaths.some((path) =>
+      location.pathname.startsWith(path)
+    );
+
+    if (!isAllowed) {
+      return <Navigate to="/admin/tickets" replace />;
     }
   }
 
-  const handleShare = async (url: string, title: string) => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: title,
-          text: "Check out my photo from Kubik Booth! ✨",
-          url: url,
-        });
-      } catch (error) {
-        console.log("Error sharing", error);
-      }
-    } else {
-      navigator.clipboard.writeText(url);
-      alert("Link copied to clipboard!");
-    }
-  };
+  // Jika ADMIN, boleh akses semua, lanjut render Outlet
+  return <Outlet />;
+}
 
-  const handleDownload = async (url: string, filename: string) => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
+function HomeRouter() {
+  const [searchParams] = useSearchParams();
+  return searchParams.get("id") ? (
+    <ClientDownload />
+  ) : (
+    <Navigate to="/login" replace />
+  );
+}
 
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (e) {
-      console.error("Download auto failed, fallback to new tab", e);
-      window.open(url, "_blank");
-    }
-  };
-
-  if (loading)
-    return (
-      <div className="screen-center">
-        <div className="loader"></div>
-        <p>Fetching Memories...</p>
-      </div>
-    );
-
-  if (errorMsg || !sessionData)
-    return (
-      <div className="screen-center">
-        <div className="error-icon">💔</div>
-        <p>{errorMsg || "Something went wrong."}</p>
-      </div>
-    );
-
+function App() {
   return (
-    <div className="main-wrapper">
-      <div className="blob blob-1"></div>
-      <div className="blob blob-2"></div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<HomeRouter />} />
+        <Route path="/login" element={<Login />} />
 
-      <div className="container">
-        <header className="fade-in-up">
-          <div className="brand-pill">KUBIK BOOTH</div>
-          <h1>
-            Your Memories
-            <br />
-            Are Ready! ✨
-          </h1>
-          <p className="subtitle">
-            {new Date(sessionData.created_at).toLocaleDateString("en-US", {
-              weekday: "long",
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-          </p>
-        </header>
+        {/* PROTECTED ROUTES */}
+        <Route element={<RequireAuth />}>
+          <Route path="/admin" element={<AdminLayout />}>
+            {/* ADMIN ONLY ROUTES (Implicitly protected by RequireAuth Logic) */}
+            <Route index element={<AdminDashboard />} />
+            <Route path="sessions" element={<SessionManager />} />
+            <Route path="devices" element={<DeviceManager />} />
 
-        <div className="gallery">
-          {/* 1. PHOTO CARD */}
-          <div className="card fade-in-up delay-1">
-            <div className="image-wrapper">
-              <img src={sessionData.final_photo_url} alt="My Photo" />
+            {/* SHARED ROUTES (Admin & Cashier) */}
+            <Route path="tickets" element={<TicketStation />} />
+          </Route>
+
+          <Route path="/session/:sessionUuid" element={<SessionDetail />} />
+        </Route>
+
+        <Route
+          path="*"
+          element={
+            <div className="text-center p-10 font-bold text-gray-500">
+              404 Not Found
             </div>
-            <div className="card-actions">
-              <button
-                onClick={() =>
-                  handleDownload(
-                    sessionData.final_photo_url,
-                    `kubik_photo_${sessionData.session_uuid}.jpg`
-                  )
-                }
-                className="btn btn-primary"
-              >
-                Download Photo 📸
-              </button>
-              <button
-                onClick={() =>
-                  handleShare(sessionData.final_photo_url, "My Photo")
-                }
-                className="btn btn-icon"
-                aria-label="Share"
-              >
-                🔗
-              </button>
-            </div>
-          </div>
-
-          {/* 2. VIDEO CARD (Updated for MP4) */}
-          {sessionData.video_url && (
-            <div className="card fade-in-up delay-2">
-              <div className="badge-live">LIVE MOTION</div>
-              <div className="image-wrapper">
-                <video
-                  src={sessionData.video_url}
-                  controls
-                  playsInline
-                  loop
-                  autoPlay
-                  muted
-                  style={{ width: "100%", display: "block" }}
-                />
-              </div>
-              <div className="card-actions">
-                <button
-                  onClick={() =>
-                    handleDownload(
-                      sessionData.video_url!,
-                      `kubik_motion_${sessionData.session_uuid}.mp4`
-                    )
-                  }
-                  className="btn btn-secondary"
-                >
-                  Download Video 🎞️
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <footer className="fade-in-up delay-3">
-          <p>Tag us on Instagram!</p>
-          <a
-            href="https://instagram.com"
-            target="_blank"
-            className="social-link"
-          >
-            @kubik.photobooth
-          </a>
-          <div className="copyright">© 2025 Kubik Space</div>
-        </footer>
-      </div>
-
-      <style>{`
-        :root {
-          --bg-color: #FFF8E7;
-          --primary: #8E44AD;
-          --text: #2D3436;
-          --white: #ffffff;
-          --shadow: 0 12px 40px rgba(142, 68, 173, 0.15);
-        }
-        * { box-sizing: border-box; }
-        body {
-          font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
-          background-color: var(--bg-color);
-          color: var(--text);
-          margin: 0; padding: 0;
-          min-height: 100vh; overflow-x: hidden;
-        }
-        .screen-center {
-          height: 100vh; display: flex; flex-direction: column;
-          justify-content: center; align-items: center;
-          color: var(--primary); font-weight: bold;
-        }
-        @keyframes fadeInUp {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .fade-in-up { animation: fadeInUp 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; opacity: 0; }
-        .delay-1 { animation-delay: 0.1s; }
-        .delay-2 { animation-delay: 0.2s; }
-        .delay-3 { animation-delay: 0.3s; }
-        
-        .main-wrapper { position: relative; min-height: 100vh; }
-        .container { max-width: 480px; margin: 0 auto; padding: 40px 24px; }
-        
-        header { text-align: center; margin-bottom: 40px; }
-        .brand-pill {
-          display: inline-block; background: var(--text); color: var(--white);
-          padding: 6px 16px; border-radius: 50px; font-size: 0.75rem; font-weight: 800;
-          margin-bottom: 16px;
-        }
-        h1 { font-size: 2.2rem; line-height: 1.1; margin: 0 0 8px 0; color: var(--primary); font-weight: 800; }
-        .subtitle { color: #888; font-weight: 500; font-size: 0.9rem; margin: 0; }
-
-        .gallery { display: flex; flex-direction: column; gap: 32px; }
-        .card {
-          background: var(--white); border-radius: 24px; padding: 16px;
-          box-shadow: var(--shadow); position: relative; transition: transform 0.3s ease;
-        }
-        .image-wrapper {
-          border-radius: 16px; overflow: hidden; background: #f0f0f0;
-          border: 1px solid rgba(0,0,0,0.05);
-        }
-        .card img, .card video { width: 100%; height: auto; display: block; }
-        
-        .card-actions { display: flex; gap: 12px; margin-top: 16px; }
-        
-        .badge-live {
-          position: absolute; top: 28px; left: 28px; background: #FF6B81;
-          color: white; font-size: 0.7rem; font-weight: 800; padding: 4px 8px;
-          border-radius: 6px; z-index: 10; box-shadow: 0 4px 10px rgba(255, 107, 129, 0.4);
-        }
-
-        .btn {
-          border: none; padding: 16px; border-radius: 14px; font-weight: 700;
-          font-size: 1rem; cursor: pointer; transition: filter 0.2s; font-family: inherit;
-        }
-        .btn:active { filter: brightness(0.9); }
-        .btn-primary { background: var(--primary); color: var(--white); flex: 1; box-shadow: 0 8px 20px rgba(142, 68, 173, 0.3); }
-        .btn-secondary { background: var(--text); color: var(--white); width: 100%; }
-        .btn-icon { background: #F3E5F5; width: 54px; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; }
-
-        footer { text-align: center; margin-top: 60px; color: #888; }
-        .social-link { color: var(--primary); font-weight: 800; text-decoration: none; font-size: 1.1rem; }
-        .copyright { font-size: 0.7rem; margin-top: 24px; opacity: 0.5; }
-        
-        .loader {
-          width: 40px; height: 40px; border: 4px solid #ddd;
-          border-top-color: var(--primary); border-radius: 50%;
-          animation: spin 1s linear infinite; margin-bottom: 16px;
-        }
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-      `}</style>
-    </div>
+          }
+        />
+      </Routes>
+    </BrowserRouter>
   );
 }
 

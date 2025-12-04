@@ -22,9 +22,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -42,21 +42,28 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.SubcomposeAsyncImage
-import coil.request.ImageRequest
 import com.jiangdg.ausbc.CameraClient
 import com.jiangdg.ausbc.camera.CameraUvcStrategy
 import com.jiangdg.ausbc.camera.bean.CameraRequest
 import com.jiangdg.ausbc.widget.IAspectRatio
 import com.thomasalfa.photobooth.data.SettingsManager
-import com.thomasalfa.photobooth.data.database.AppDatabase
+import com.thomasalfa.photobooth.data.database.FrameEntity
+import com.thomasalfa.photobooth.utils.layout.LayoutProcessor
 import com.thomasalfa.photobooth.presentation.components.ControlButton
-import com.thomasalfa.photobooth.presentation.components.SessionProgressIndicator
 import com.thomasalfa.photobooth.presentation.components.ShutterButton
+import com.thomasalfa.photobooth.ui.theme.NeoBlack
+import com.thomasalfa.photobooth.ui.theme.NeoCream
+import com.thomasalfa.photobooth.ui.theme.NeoGreen
+import com.thomasalfa.photobooth.ui.theme.NeoPink
+import com.thomasalfa.photobooth.ui.theme.NeoPurple
 import com.thomasalfa.photobooth.utils.camera.CameraPreview
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import com.thomasalfa.photobooth.ui.theme.NeoYellow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -64,12 +71,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
-import java.util.Locale
+import kotlin.math.max
 
 // --- 1. DEFINISI STATE ---
 enum class CameraState {
     NO_DEVICE,      // Tidak ada kabel USB
-    DEVICE_FOUND,   // Kabel terdeteksi, siap inisialisasi
+    DEVICE_FOUND,   // Kabel terdeteksi
     ENGINE_READY,   // CameraClient sudah dibuat
     PREVIEWING,     // Preview sedang jalan
     ERROR           // Terjadi kesalahan fatal
@@ -79,24 +86,25 @@ data class CameraResolution(val name: String, val width: Int, val height: Int)
 
 @Composable
 fun CaptureScreen(
+    selectedFrame: FrameEntity,
     modifier: Modifier = Modifier,
-    // Kita biarkan parameter ke-2 (List Boomerang) ada tapi nanti kita isi kosong
-    // Ini biar MainActivity tidak error (Backward Compatibility)
-    onSessionComplete: (List<String>, List<String>) -> Unit
+    onSessionComplete: (List<String>) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settingsManager = remember { SettingsManager(context) }
-    val db = remember { AppDatabase.getDatabase(context) }
+    val settingPhotoCount by settingsManager.photoCountFlow.collectAsState(initial = 8)
 
     // --- SETTINGS ---
-    val settingPhotoCount by settingsManager.photoCountFlow.collectAsState(initial = 6)
+    // Note: settingPhotoCount dihapus karena sekarang pakai targetCount dari Frame
     val settingTimer by settingsManager.timerDurationFlow.collectAsState(initial = 3)
     val settingMode by settingsManager.captureModeFlow.collectAsState(initial = "AUTO")
     val settingDelay by settingsManager.autoDelayFlow.collectAsState(initial = 2)
 
-    val sessionList by db.sessionDao().getAllSessions().collectAsState(initial = emptyList())
-    val sessionNumber = remember(sessionList) { sessionList.size + 1 }
+    val targetCount = remember(selectedFrame, settingPhotoCount) {
+        val requiredByFrame = LayoutProcessor.getPhotoCountForLayout(selectedFrame.layoutType)
+        max(requiredByFrame, settingPhotoCount)
+    }
 
     // --- RESOLUSI ---
     val availableResolutions = listOf(
@@ -116,12 +124,10 @@ fun CaptureScreen(
     var textureViewRef by remember { mutableStateOf<TextureView?>(null) }
 
     // Helper UI States
-    var isAppLoading by remember { mutableStateOf(true) }
     var hasPermission by remember { mutableStateOf(false) }
 
     // Session States
     val capturedPhotos = remember { mutableStateListOf<String>() }
-    // VAR BOOMERANG DIHAPUS
     var isSessionRunning by remember { mutableStateOf(false) }
     var isAutoLoopActive by remember { mutableStateOf(false) }
 
@@ -135,11 +141,11 @@ fun CaptureScreen(
     val focusRequester = remember { FocusRequester() }
 
     // ==========================================================================================
-    // 1. PERMISSION & LOADING INIT
+    // 1. PERMISSION & INIT
     // ==========================================================================================
     LaunchedEffect(Unit) {
         delay(1000)
-        isAppLoading = false
+        // Request focus agar keyboard listener jalan (Volume button shutter)
         focusRequester.requestFocus()
     }
 
@@ -221,7 +227,7 @@ fun CaptureScreen(
                             .build()
                         cameraClient = client
                         currentState = CameraState.ENGINE_READY
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         currentState = CameraState.ERROR
                     }
                 } else {
@@ -237,7 +243,7 @@ fun CaptureScreen(
                             client.openCamera(textureViewRef as IAspectRatio)
                         }
                         currentState = CameraState.PREVIEWING
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         delay(1000)
                         currentState = CameraState.DEVICE_FOUND
                     }
@@ -313,38 +319,35 @@ fun CaptureScreen(
         isSessionRunning = false
     }
 
-    // FUNGSI BOOMERANG SUDAH DIHAPUS
-
     fun handleShutterClick() {
         scope.launch {
             if (settingMode == "AUTO") {
+                // Auto Loop Logic
                 if (isAutoLoopActive) return@launch
                 isAutoLoopActive = true
 
-                while (capturedPhotos.size < settingPhotoCount) {
+                while (capturedPhotos.size < targetCount) {
                     if (capturedPhotos.isNotEmpty()) {
-                        statusMessage = "Next Pose..."
+                        statusMessage = "Pose ${capturedPhotos.size + 1}/$targetCount"
                         delay(settingDelay * 1000L)
                     }
                     performSingleCapture()
                 }
 
-                // --- MODIFIKASI: LANGSUNG SELESAI TANPA BOOMERANG ---
-                delay(500) // Jeda sedikit biar user sadar sudah selesai
-                statusMessage = "Processing..."
-
-                // Kirim Empty List sebagai parameter kedua (pengganti boomerang)
-                onSessionComplete(capturedPhotos.toList(), emptyList())
-
+                delay(800)
+                onSessionComplete(capturedPhotos.toList())
                 isAutoLoopActive = false
+
             } else {
+                // Manual Logic
                 if (isSessionRunning) return@launch
                 performSingleCapture()
-                if (capturedPhotos.size >= settingPhotoCount) {
-                    delay(500)
-                    onSessionComplete(capturedPhotos.toList(), emptyList())
+
+                if (capturedPhotos.size >= targetCount) {
+                    delay(800)
+                    onSessionComplete(capturedPhotos.toList())
                 } else {
-                    statusMessage = "Tap for Next!"
+                    statusMessage = "Next Pose!"
                 }
             }
         }
@@ -361,191 +364,310 @@ fun CaptureScreen(
     // ==========================================================================================
     // UI LAYOUT
     // ==========================================================================================
-    Box(modifier = modifier
-        .fillMaxSize()
-        .background(MaterialTheme.colorScheme.background)
-        .focusRequester(focusRequester)
-        .focusable()
-        .onKeyEvent { event ->
-            if (event.type == KeyEventType.KeyDown) {
-                when (event.nativeKeyEvent.keyCode) {
-                    KeyEvent.KEYCODE_VOLUME_UP,
-                    KeyEvent.KEYCODE_VOLUME_DOWN,
-                    KeyEvent.KEYCODE_ENTER,
-                    KeyEvent.KEYCODE_HEADSETHOOK -> {
-                        if (!isSessionRunning && !isAutoLoopActive && capturedPhotos.size < settingPhotoCount) {
-                            handleShutterClick()
-                            return@onKeyEvent true
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(NeoBlack)
+            .focusRequester(focusRequester)
+            .focusable()
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_VOLUME_UP,
+                        KeyEvent.KEYCODE_VOLUME_DOWN,
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_HEADSETHOOK -> {
+                            if (!isSessionRunning && !isAutoLoopActive && capturedPhotos.size < targetCount) {
+                                handleShutterClick()
+                                return@onKeyEvent true
+                            }
                         }
                     }
                 }
+                false
             }
-            false
-        }
     ) {
-        Row(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            // --- KIRI: VIEWFINDER ---
+        Row(modifier = Modifier.fillMaxSize()) {
+
+            // ----------------------------------------------------------------
+            // PANEL KIRI: CAMERA PREVIEW (70%) - CLEAN VIEW
+            // ----------------------------------------------------------------
             Box(
                 modifier = Modifier
-                    .weight(3f)
+                    .weight(0.7f)
                     .fillMaxHeight()
+                    .padding(16.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .border(
-                        width = 4.dp, // Border Tetap Hitam/Putih (Tidak ada merah REC lagi)
-                        color = MaterialTheme.colorScheme.onBackground,
-                        shape = RoundedCornerShape(24.dp)
-                    )
                     .background(Color.Black),
                 contentAlignment = Alignment.Center
             ) {
+                // 1. Camera Viewfinder
                 CameraPreview(
                     modifier = Modifier.fillMaxSize(),
                     cameraClient = cameraClient
-                ) { view ->
-                    if (view is TextureView) textureViewRef = view
-                }
+                ) { view -> if (view is TextureView) textureViewRef = view }
 
-                // UI Loading / Error
+                // 2. Loading State Overlay
                 if (currentState != CameraState.PREVIEWING) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        CircularProgressIndicator(color = NeoPink)
                         Spacer(modifier = Modifier.height(16.dp))
                         val msg = when(currentState) {
-                            CameraState.NO_DEVICE -> "Cek Kabel Kamera USB..."
+                            CameraState.NO_DEVICE -> "Hubungkan Kabel Kamera..."
                             CameraState.DEVICE_FOUND -> "Kamera Ditemukan..."
-                            CameraState.ENGINE_READY -> "Menyiapkan Preview..."
-                            CameraState.ERROR -> "Error, mencoba ulang..."
+                            CameraState.ENGINE_READY -> "Menyiapkan Lensa..."
+                            CameraState.ERROR -> "Gangguan Sinyal..."
                             else -> "Loading..."
                         }
                         Text(msg, color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
 
-                // Countdown Raksasa
+                // 3. Countdown Raksasa
                 if (countdownValue > 0) {
                     val scale by animateFloatAsState(
                         targetValue = if (countdownValue % 2 == 0) 1.2f else 1f,
                         animationSpec = tween(500), label = "scale"
                     )
                     Box(
-                        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            countdownValue.toString(),
-                            color = MaterialTheme.colorScheme.tertiary,
-                            fontSize = 180.sp,
+                            text = countdownValue.toString(),
+                            color = NeoYellow,
+                            fontSize = 200.sp,
                             fontWeight = FontWeight.Black,
                             modifier = Modifier.scale(scale)
                         )
                     }
                 }
 
-                // Flash Putih
+                // 4. Flash Effect
                 if (showFlash) Box(Modifier.fillMaxSize().background(Color.White))
             }
 
-            Spacer(modifier = Modifier.width(16.dp))
-
-            // --- KANAN: KONTROL ---
+            // ----------------------------------------------------------------
+            // PANEL KANAN: DASHBOARD (30%) - INTERACTIVE CONTROL
+            // ----------------------------------------------------------------
             Column(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(0.3f)
                     .fillMaxHeight()
+                    .padding(top = 16.dp, bottom = 16.dp, end = 16.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
+                    .background(NeoCream)
+                    .padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    val formattedSession = String.format(Locale.US, "%03d", sessionNumber)
-                    Text("SESSION #$formattedSession", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
-                    Text("Res: ${currentRes.name}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Text(
-                        text = if (isAutoLoopActive || isSessionRunning) statusMessage else "Ready?",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Black,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    SessionProgressIndicator(totalShots = settingPhotoCount, currentShot = capturedPhotos.size)
-                }
 
-                Box(modifier = Modifier.weight(1f).padding(vertical = 16.dp)) {
-                    LazyVerticalGrid(columns = GridCells.Fixed(2), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(capturedPhotos) { photoPath ->
-                            SubcomposeAsyncImage(
-                                model = ImageRequest.Builder(context).data(File(photoPath)).crossfade(true).build(),
-                                contentDescription = "Result",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.aspectRatio(1f).clip(RoundedCornerShape(12.dp)).border(2.dp, MaterialTheme.colorScheme.onSurface, RoundedCornerShape(12.dp)),
-                                error = { Box(Modifier.fillMaxSize().background(Color.LightGray)) }
-                            )
-                        }
-                    }
-                }
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    if (!isAutoLoopActive && capturedPhotos.isEmpty()) {
-                        ControlButton(Icons.Default.Settings, "Set", { showResDialog = true })
-                        ControlButton(Icons.Default.Refresh, "Reset", {
-                            // Reset Bersih
-                            capturedPhotos.clear()
-                            // Smart Reset Mesin Kamera
-                            try { cameraClient?.closeCamera() } catch (_: Exception) {}
-                            cameraClient = null
-                            currentState = CameraState.NO_DEVICE
-                        })
-                    }
-                }
+                // HEADER STATUS
+                Text(
+                    text = if(isAutoLoopActive) "AUTO SHOOT" else "PHOTO SESSION",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.Gray,
+                    letterSpacing = 2.sp
+                )
+                Text(
+                    text = if (isAutoLoopActive) "POSE NOW!" else statusMessage,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Black,
+                    color = NeoPurple,
+                    textAlign = TextAlign.Center
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
-                ShutterButton(
-                    isEnabled = !isAutoLoopActive && !isSessionRunning && capturedPhotos.size < settingPhotoCount,
-                    onClick = { handleShutterClick() }
-                )
-            }
-        }
 
-        if (showResDialog) {
-            AlertDialog(
-                onDismissRequest = { showResDialog = false },
-                title = { Text("Select Resolution", fontWeight = FontWeight.Bold) },
-                text = {
-                    Column {
-                        availableResolutions.forEachIndexed { index, res ->
+                // SLOT INDICATOR
+                Box(
+                    modifier = Modifier
+                        .weight(1f) // Mengisi sisa ruang vertikal
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White)
+                        .padding(12.dp) // Padding dalam container putih
+                ) {
+
+                    val listState = rememberLazyGridState()
+
+                    // 2. EFEK AUTO SCROLL
+                    // Setiap kali capturedPhotos bertambah, scroll ke item terakhir (slot kosong berikutnya)
+                    LaunchedEffect(capturedPhotos.size) {
+                        if (capturedPhotos.size < targetCount) {
+                            // Scroll ke index capturedPhotos.size (karena index mulai dari 0)
+                            // Contoh: Punya 4 foto (index 0-3), scroll ke index 4 (slot kosong ke-5)
+                            listState.animateScrollToItem(capturedPhotos.size)
+                        }
+                    }
+                    LazyVerticalGrid(
+                        state = listState,
+                        columns = GridCells.Fixed(1),
+                        verticalArrangement = Arrangement.spacedBy(12.dp), // Jarak antar item lebih lega
+                        contentPadding = PaddingValues(bottom = 12.dp)
+                    ) {
+                        items(targetCount) { index ->
+                            val photoPath = capturedPhotos.getOrNull(index)
+                            val isCurrentTarget = index == capturedPhotos.size
+                            val isTaken = index < capturedPhotos.size
+
+                            // Container Slot (Row Horizontal)
                             Row(
-                                modifier = Modifier.fillMaxWidth().clickable { selectedResIndex = index; showResDialog = false }.padding(vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(80.dp) // Sedikit lebih tinggi biar thumbnail jelas
+                                    .border(
+                                        width = if(isCurrentTarget) 2.dp else 0.dp,
+                                        color = if(isCurrentTarget) NeoPink else Color.Transparent,
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFF8F9FA)), // Background abu sangat muda
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Start
                             ) {
-                                RadioButton(selected = (index == selectedResIndex), onClick = { selectedResIndex = index; showResDialog = false })
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(res.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
-                                    Text("${res.width} x ${res.height}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                // 1. NOMOR URUT (Kiri)
+                                Box(
+                                    modifier = Modifier
+                                        .width(40.dp)
+                                        .fillMaxHeight()
+                                        .background(
+                                            when {
+                                                isTaken -> NeoGreen // Sudah foto
+                                                isCurrentTarget -> NeoPink // Sedang aktif
+                                                else -> Color.LightGray // Belum
+                                            }
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "${index + 1}",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                }
+
+                                // 2. THUMBNAIL FOTO (4:3 Ratio Fix)
+                                // Ini kuncinya: Kita kunci rasionya agar tidak melebar
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .aspectRatio(4f/3f) // KUNCI UTAMA: Memaksa rasio 4:3 (Landscape)
+                                        .padding(4.dp) // Padding dikit biar ada frame
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.Gray.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (photoPath != null) {
+                                        SubcomposeAsyncImage(
+                                            model = File(photoPath),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop, // Crop wajar sesuai rasio 4:3
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        // Placeholder Icon kalau belum ada foto
+                                        Icon(
+                                            imageVector = Icons.Default.CameraAlt, // Pastikan icon ini ada/diganti
+                                            contentDescription = null,
+                                            tint = Color.Gray.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                // 3. STATUS TEXT (Sisa Ruang Kanan)
+                                Column(
+                                    verticalArrangement = Arrangement.Center,
+                                    modifier = Modifier.fillMaxHeight()
+                                ) {
+                                    Text(
+                                        text = if (photoPath != null) "Captured" else if (isCurrentTarget) "Shooting..." else "Waiting",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isCurrentTarget) NeoPink else NeoBlack
+                                    )
+                                    if (photoPath == null) {
+                                        Text(
+                                            text = "4:3 Ratio",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.Gray
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                },
-                confirmButton = { TextButton(onClick = { showResDialog = false }) { Text("Cancel") } },
-                containerColor = MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(16.dp)
-            )
-        }
-    }
-}
+                }
 
-@Composable
-fun CuteLoadingAnimation() {
-    val transition = rememberInfiniteTransition(label = "loading")
-    val dots = listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.secondary)
-    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        dots.forEachIndexed { index, color ->
-            val scale by transition.animateFloat(initialValue = 0.5f, targetValue = 1.2f, animationSpec = infiniteRepeatable(animation = tween(600, delayMillis = index * 150, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse), label = "dot")
-            Box(modifier = Modifier.size(30.dp).scale(scale).clip(CircleShape).background(color))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // FOOTER CONTROLS
+                if (!isAutoLoopActive) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        ControlButton(Icons.Default.Refresh, "Reset Cam") {
+                            capturedPhotos.clear()
+                            try { cameraClient?.closeCamera() } catch (_: Exception) {}
+                            cameraClient = null
+                            currentState = CameraState.NO_DEVICE
+                        }
+
+                        ControlButton(Icons.Default.Settings, "Quality") {
+                            showResDialog = true
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    ShutterButton(
+                        isEnabled = capturedPhotos.size < targetCount,
+                        onClick = { handleShutterClick() },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    Text(
+                        "Please wait...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.Gray
+                    )
+                }
+            }
+        }
+
+        // DIALOG RESOLUSI
+        if (showResDialog) {
+            AlertDialog(
+                onDismissRequest = { showResDialog = false },
+                title = { Text("Camera Quality") },
+                text = {
+                    Column {
+                        availableResolutions.forEachIndexed { index, res ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedResIndex = index
+                                        showResDialog = false
+                                    }
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = (index == selectedResIndex),
+                                    onClick = { selectedResIndex = index; showResDialog = false }
+                                )
+                                Text(res.name)
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showResDialog = false }) { Text("Cancel") } }
+            )
         }
     }
 }
