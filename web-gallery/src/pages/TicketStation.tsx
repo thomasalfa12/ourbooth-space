@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useUserRole } from "../hooks/useUserRole";
 import type { Device, Ticket } from "../types/supabase";
@@ -39,6 +40,7 @@ import {
 } from "../components/ui/table";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "../lib/utils";
+import { Toaster, toast } from "sonner";
 
 // --- TYPES ---
 type TicketStatus = "ALL" | "AVAILABLE" | "USED";
@@ -47,9 +49,11 @@ type TicketStatus = "ALL" | "AVAILABLE" | "USED";
 const TicketCard = ({
   code,
   deviceName,
+  timestamp,
 }: {
   code: string;
   deviceName?: string;
+  timestamp?: string;
 }) => (
   <div className="relative bg-white text-zinc-900 rounded-none w-full max-w-[340px] shadow-2xl mx-auto overflow-hidden">
     {/* Serrated Top */}
@@ -97,20 +101,18 @@ const TicketCard = ({
         <div className="flex justify-between text-xs font-bold border-b border-zinc-100 pb-2 mb-2">
           <span className="text-zinc-400">LOCATION</span>
           <span className="text-right max-w-[150px] truncate">
-            {deviceName}
+            {deviceName || "Unknown Location"}
           </span>
         </div>
         <div className="flex justify-between text-xs font-bold">
-          <span className="text-zinc-400">DATE</span>
-          <span>{new Date().toLocaleDateString()}</span>
-        </div>
-        <div className="flex justify-between text-xs font-bold">
-          <span className="text-zinc-400">TIME</span>
+          <span className="text-zinc-400">ISSUED AT</span>
           <span>
-            {new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            {timestamp
+              ? new Date(timestamp).toLocaleString("id-ID", {
+                  dateStyle: "short",
+                  timeStyle: "short",
+                })
+              : new Date().toLocaleString()}
           </span>
         </div>
       </div>
@@ -132,11 +134,18 @@ const TicketCard = ({
 
 export default function TicketStation() {
   const { role, assignedDevice, loading: roleLoading } = useUserRole();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const ticketCodeParam = searchParams.get("ticket");
 
   // --- STATE ---
   const [vendingDevices, setVendingDevices] = useState<Device[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
-  const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+
+  const [activeTicket, setActiveTicket] = useState<{
+    code: string;
+    created_at?: string;
+  } | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
@@ -145,6 +154,25 @@ export default function TicketStation() {
   const [ticketHistoryLoading, setTicketHistoryLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TicketStatus>("ALL");
   const [showHistory, setShowHistory] = useState(false);
+
+  // --- EFFECT: Handle URL Params (Persist State on Refresh) ---
+  useEffect(() => {
+    if (ticketCodeParam) {
+      const foundInHistory = tickets.find((t) => t.code === ticketCodeParam);
+
+      // [FIX] Validasi Status USED
+      if (foundInHistory && foundInHistory.status === "USED") {
+        setActiveTicket(null);
+        setSearchParams({}); // Hapus URL param
+        return;
+      }
+
+      setActiveTicket({
+        code: ticketCodeParam,
+        created_at: foundInHistory?.created_at,
+      });
+    }
+  }, [ticketCodeParam, tickets, setSearchParams]);
 
   // --- DATA FETCHING ---
   useEffect(() => {
@@ -171,7 +199,7 @@ export default function TicketStation() {
     }
   }, [role, assignedDevice, roleLoading]);
 
-  // --- HISTORY LOGIC (Wrapped in useCallback) ---
+  // --- HISTORY LOGIC ---
   const fetchTicketHistory = useCallback(async () => {
     if (!selectedDeviceId) return;
     setTicketHistoryLoading(true);
@@ -192,47 +220,65 @@ export default function TicketStation() {
       if (data) setTickets(data as Ticket[]);
     } catch (err) {
       console.error("Fetch Error:", err);
+      toast.error("Failed to load history");
     } finally {
       setTicketHistoryLoading(false);
     }
   }, [selectedDeviceId, statusFilter]);
 
-  // Auto-fetch history when dependencies change AND history is open
   useEffect(() => {
-    if (selectedDeviceId && showHistory) fetchTicketHistory();
-  }, [selectedDeviceId, statusFilter, showHistory, fetchTicketHistory]);
+    if (selectedDeviceId) fetchTicketHistory();
+  }, [selectedDeviceId, statusFilter, fetchTicketHistory]);
 
   // --- ACTIONS ---
+
+  // [FIX] Updated Select Logic
+  const selectTicket = (ticket: Ticket) => {
+    if (ticket.status === "USED") {
+      toast.error("This ticket has already been used.");
+      return;
+    }
+    setActiveTicket({ code: ticket.code, created_at: ticket.created_at });
+    setSearchParams({ ticket: ticket.code });
+  };
+
   const handleGenerateTicket = async () => {
     if (!selectedDeviceId) return;
     setLoading(true);
-    setGeneratedCode(null);
+
+    setActiveTicket(null);
+    setSearchParams({});
 
     try {
-      const newCode = Math.floor(100000 + Math.random() * 900000).toString();
-      const { error } = await supabase.from("tickets").insert({
-        code: newCode,
-        device_id: selectedDeviceId,
-        status: "AVAILABLE",
+      const { data, error } = await supabase.rpc("generate_ticket_code", {
+        target_device_id: selectedDeviceId,
       });
+
       if (error) throw error;
 
+      const newTicket = data as unknown as Ticket;
+
       setTimeout(() => {
-        setGeneratedCode(newCode);
+        // Otomatis select tiket baru (Status pasti AVAILABLE)
+        selectTicket(newTicket);
+
         setLoading(false);
-        if (showHistory) fetchTicketHistory();
+        toast.success("Ticket generated successfully!");
+        fetchTicketHistory();
       }, 800);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Unknown Error";
-      alert("Failed: " + message);
+      console.error("Generation Error:", err);
+      toast.error("Failed to generate ticket: " + message);
       setLoading(false);
     }
   };
 
   const copyToClipboard = () => {
-    if (generatedCode) {
-      navigator.clipboard.writeText(generatedCode);
+    if (activeTicket?.code) {
+      navigator.clipboard.writeText(activeTicket.code);
       setIsCopied(true);
+      toast.success("Code copied to clipboard");
       setTimeout(() => setIsCopied(false), 2000);
     }
   };
@@ -244,7 +290,7 @@ export default function TicketStation() {
     });
   };
 
-  // --- LOADING / ACCESS STATES ---
+  // --- RENDER LOADING / ACCESS STATES ---
   if (roleLoading) {
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-zinc-50">
@@ -274,8 +320,13 @@ export default function TicketStation() {
     );
   }
 
+  const currentDeviceName =
+    vendingDevices.find((d) => d.id === selectedDeviceId)?.name ||
+    "Unknown Device";
+
   return (
     <div className="min-h-screen bg-[#F8F9FA] p-4 md:p-8 font-sans selection:bg-indigo-500 selection:text-white">
+      <Toaster position="top-center" richColors />
       <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
         {/* HEADER */}
         <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-zinc-200">
@@ -323,7 +374,8 @@ export default function TicketStation() {
                       value={selectedDeviceId}
                       onValueChange={(v) => {
                         setSelectedDeviceId(v);
-                        setGeneratedCode(null);
+                        setActiveTicket(null);
+                        setSearchParams({});
                       }}
                     >
                       <SelectTrigger className="h-14 rounded-xl bg-zinc-50 border-zinc-200 focus:ring-indigo-500 text-base font-medium">
@@ -497,7 +549,14 @@ export default function TicketStation() {
                               tickets.map((t) => (
                                 <TableRow
                                   key={t.id}
-                                  className="group border-none hover:bg-zinc-50"
+                                  // [FIXED] Updated click handler
+                                  onClick={() => selectTicket(t)}
+                                  className={cn(
+                                    "group border-none transition-colors",
+                                    t.status === "USED"
+                                      ? "opacity-60 cursor-not-allowed hover:bg-zinc-50"
+                                      : "cursor-pointer hover:bg-indigo-50"
+                                  )}
                                 >
                                   <TableCell className="py-3 font-mono font-bold text-xs text-zinc-900">
                                     {t.code}
@@ -542,9 +601,9 @@ export default function TicketStation() {
             <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-emerald-500/10 rounded-full blur-[100px] pointer-events-none" />
 
             <AnimatePresence mode="wait">
-              {generatedCode ? (
+              {activeTicket ? (
                 <motion.div
-                  key="ticket"
+                  key={activeTicket.code}
                   initial={{ y: -100, opacity: 0, scale: 0.9 }}
                   animate={{ y: 0, opacity: 1, scale: 1 }}
                   exit={{ y: 100, opacity: 0, scale: 0.8 }}
@@ -552,11 +611,9 @@ export default function TicketStation() {
                   className="relative z-10 w-full flex flex-col items-center"
                 >
                   <TicketCard
-                    code={generatedCode}
-                    deviceName={
-                      vendingDevices.find((d) => d.id === selectedDeviceId)
-                        ?.name || "Unknown Device"
-                    }
+                    code={activeTicket.code}
+                    deviceName={currentDeviceName}
+                    timestamp={activeTicket.created_at}
                   />
 
                   <motion.div

@@ -12,8 +12,7 @@ import {
   ArrowUpRight,
   Calendar,
 } from "lucide-react";
-import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
-import type { Session, SessionInsertPayload, Device } from "../types";
+import type { Session, Device } from "../types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -85,13 +84,33 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchSessions();
     const subscription = supabase
-      .channel("sessions")
+      .channel("admin-dashboard")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "sessions" },
-        (payload: RealtimePostgresChangesPayload<SessionInsertPayload>) => {
-          const newSession = payload.new as Session;
-          setSessions((prev) => [newSession, ...prev]);
+        { event: "*", schema: "public", table: "sessions" },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            setSessions((prev) => [payload.new as Session, ...prev]);
+          } else if (payload.eventType === "DELETE") {
+            setSessions((prev) => prev.filter((s) => s.id !== payload.old.id));
+          } else if (payload.eventType === "UPDATE") {
+            setSessions((prev) =>
+              prev.map((s) =>
+                s.id === payload.new.id ? (payload.new as Session) : s
+              )
+            );
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "devices" },
+        (payload) => {
+          setDevices((prev) =>
+            prev.map((d) =>
+              d.id === payload.new.id ? (payload.new as Device) : d
+            )
+          );
         }
       )
       .subscribe();
@@ -295,7 +314,7 @@ export default function AdminDashboard() {
 
         {/* --- QUICK ACTIONS PANEL (CLEAN CODE: Standard Values) --- */}
         {/* Note: bg-gradient-to-br is standard v3. Use bg-linear-to-br only if on v4/custom config */}
-        <div className="bg-gradient-to-br from-kubik-blue to-blue-700 rounded-2xl shadow-xl shadow-blue-500/20 p-6 text-white relative overflow-hidden">
+        <div className="bg-linear-to-br from-kubik-blue to-blue-700 rounded-2xl shadow-xl shadow-blue-500/20 p-6 text-white relative overflow-hidden">
           {/* FIX: Mengganti arbitrary values [-20px] dengan standard spacing scale 
                 -20px = -5 (karena 1 unit = 4px, jadi 5 * 4 = 20)
              */}

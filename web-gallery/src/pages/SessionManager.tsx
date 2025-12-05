@@ -17,8 +17,7 @@ import {
   Clock,
   Layers,
 } from "lucide-react";
-import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
-import type { Session, SessionInsertPayload } from "../types";
+import type { Session } from "../types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -78,13 +77,22 @@ export default function SessionManager() {
   useEffect(() => {
     fetchSessions();
     const subscription = supabase
-      .channel("sessions")
+      .channel("session-manager")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "sessions" },
-        (payload: RealtimePostgresChangesPayload<SessionInsertPayload>) => {
-          const newSession = payload.new as Session;
-          setSessions((prev) => [newSession, ...prev]);
+        { event: "*", schema: "public", table: "sessions" },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            setSessions((prev) => [payload.new as Session, ...prev]);
+          } else if (payload.eventType === "DELETE") {
+            setSessions((prev) => prev.filter((s) => s.id !== payload.old.id));
+          } else if (payload.eventType === "UPDATE") {
+            setSessions((prev) =>
+              prev.map((s) =>
+                s.id === payload.new.id ? (payload.new as Session) : s
+              )
+            );
+          }
         }
       )
       .subscribe();

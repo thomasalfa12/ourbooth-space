@@ -63,8 +63,27 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
+    // Listen for profile changes (Realtime Role/Device updates)
+    const profileSub = supabase
+      .channel("user-context-profile")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "profiles" },
+        async (payload) => {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+          if (user && payload.new.id === user.id) {
+            console.log("Profile updated, refreshing context...");
+            fetchUserContext();
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       subscription.unsubscribe();
+      profileSub.unsubscribe();
     };
   }, []);
 

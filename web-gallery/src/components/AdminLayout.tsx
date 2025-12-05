@@ -77,7 +77,7 @@ export default function AdminLayout() {
   if (loading) return null;
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA] flex font-sans selection:bg-blue-600 selection:text-white overflow-hidden">
+    <div className="min-h-screen bg-kubik-bg flex font-sans selection:bg-blue-600 selection:text-white overflow-hidden">
       {/* ========================================
           DESKTOP SIDEBAR (Static + Motion)
           ========================================
@@ -153,7 +153,7 @@ export default function AdminLayout() {
         {/* FOOTER PROFILE */}
         <div className="p-4 border-t border-gray-100/50">
           <div className="flex items-center gap-3 p-3 rounded-2xl bg-gray-50/50 border border-gray-100 hover:border-gray-200 transition-colors group">
-            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-bold text-xs shadow-sm">
+            <div className="w-9 h-9 rounded-full bg-linear-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-bold text-xs shadow-sm">
               A
             </div>
             <div className="flex-1 min-w-0">
@@ -181,7 +181,7 @@ export default function AdminLayout() {
       */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden relative">
         {/* GLOBAL HEADER */}
-        <header className="h-16 md:h-20 px-4 md:px-8 flex items-center justify-between bg-[#FAFAFA]/80 backdrop-blur-md sticky top-0 z-30">
+        <header className="h-16 md:h-20 px-4 md:px-8 flex items-center justify-between bg-kubik-bg/80 backdrop-blur-md sticky top-0 z-30">
           {/* Mobile Brand (Only Visible on Mobile) */}
           <div className="md:hidden flex items-center gap-2">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
@@ -237,7 +237,7 @@ export default function AdminLayout() {
               const isActive = location.pathname === item.path;
               return (
                 <Link key={item.id} to={item.path} className="relative group">
-                  <div className="px-5 py-3 flex flex-col items-center justify-center gap-1 min-w-[64px]">
+                  <div className="px-5 py-3 flex flex-col items-center justify-center gap-1 min-w-16">
                     {/* MOTION: Sliding Pill for Mobile */}
                     {isActive && (
                       <motion.div

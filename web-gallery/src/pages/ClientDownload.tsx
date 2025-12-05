@@ -7,6 +7,8 @@ import {
   Check,
   Camera,
   Heart,
+  Loader2, // Tambahan icon loading
+  ArrowDownToLine,
 } from "lucide-react";
 import type { Session } from "../types";
 import { motion } from "framer-motion";
@@ -17,7 +19,7 @@ const SmartImage = ({
   src,
   alt,
   className,
-  aspectRatio = "aspect-[2/3]",
+  aspectRatio = "aspect-2/3", // FIX WARNING: Pakai class standar, bukan arbitrary value
 }: {
   src: string;
   alt: string;
@@ -35,16 +37,16 @@ const SmartImage = ({
       )}
     >
       {!loaded && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-100 animate-pulse">
-          <ImageIcon className="text-gray-300 w-8 h-8" />
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-100 text-gray-300">
+          <Loader2 className="w-8 h-8 animate-spin" />
         </div>
       )}
       <img
         src={src}
         alt={alt}
         className={cn(
-          "w-full h-full object-cover transition-opacity duration-500",
-          loaded ? "opacity-100" : "opacity-0"
+          "w-full h-full object-cover transition-all duration-500",
+          loaded ? "opacity-100 scale-100" : "opacity-0 scale-105"
         )}
         onLoad={() => setLoaded(true)}
       />
@@ -59,7 +61,6 @@ export default function ClientDownload() {
   const [isCopied, setIsCopied] = useState(false);
 
   useEffect(() => {
-    // Ambil ID dari URL Param
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get("id");
 
@@ -89,7 +90,6 @@ export default function ClientDownload() {
     }
   }
 
-  // Parse Raw Photos safely
   const rawPhotos: string[] = sessionData?.raw_photos_urls
     ? JSON.parse(sessionData.raw_photos_urls)
     : [];
@@ -105,7 +105,7 @@ export default function ClientDownload() {
           url: url,
         });
       } catch (error) {
-        console.log("Error sharing", error);
+        console.log(error);
       }
     } else {
       navigator.clipboard.writeText(url);
@@ -115,7 +115,6 @@ export default function ClientDownload() {
   };
 
   const handleDownload = async (url: string, filename: string) => {
-    // Trik untuk download cross-origin image tanpa membuka tab baru (jika support)
     try {
       const response = await fetch(url);
       const blob = await response.blob();
@@ -128,7 +127,6 @@ export default function ClientDownload() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
     } catch {
-      // Fallback
       window.open(url, "_blank");
     }
   };
@@ -137,7 +135,8 @@ export default function ClientDownload() {
 
   if (loading)
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#FAFAFA]">
+      // FIX WARNING: bg-[#FAFAFA] -> bg-kubik-bg
+      <div className="min-h-screen flex flex-col items-center justify-center bg-kubik-bg">
         <div className="relative">
           <div className="w-16 h-16 border-4 border-blue-100 border-t-kubik-blue rounded-full animate-spin" />
           <div className="absolute inset-0 flex items-center justify-center">
@@ -152,7 +151,8 @@ export default function ClientDownload() {
 
   if (errorMsg || !sessionData)
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#FAFAFA] px-6 text-center">
+      // FIX WARNING: bg-[#FAFAFA] -> bg-kubik-bg
+      <div className="min-h-screen flex flex-col items-center justify-center bg-kubik-bg px-6 text-center">
         <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6 shadow-sm">
           <Heart className="w-10 h-10 text-red-400 fill-red-400" />
         </div>
@@ -166,7 +166,8 @@ export default function ClientDownload() {
     );
 
   return (
-    <div className="min-h-screen w-full bg-[#FAFAFA] font-sans selection:bg-kubik-blue selection:text-white">
+    // FIX WARNING: bg-[#FAFAFA] -> bg-kubik-bg
+    <div className="min-h-screen w-full bg-kubik-bg font-sans selection:bg-kubik-blue selection:text-white pb-32">
       {/* BACKGROUND DECOR */}
       <div
         className="fixed inset-0 pointer-events-none opacity-[0.03]"
@@ -176,57 +177,58 @@ export default function ClientDownload() {
         }}
       />
 
-      <div className="max-w-md mx-auto min-h-screen bg-white shadow-2xl shadow-gray-200/50 relative flex flex-col">
-        {/* --- HERO SECTION --- */}
-        <div className="p-6 pb-0 pt-12 text-center space-y-4 relative z-10">
-          <motion.div
-            initial={{ y: -20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ duration: 0.6 }}
-          >
-            <div className="inline-flex items-center gap-2 bg-kubik-black text-white px-4 py-1.5 rounded-full text-[10px] font-bold tracking-[0.2em] uppercase mb-4 shadow-lg shadow-kubik-black/20">
-              <Camera size={12} /> Kubik Moment
-            </div>
-            <h1 className="text-4xl font-black text-kubik-black tracking-tight leading-tight">
-              Your <span className="text-kubik-blue">Photos</span>
-              <br />
-              Are Ready!
-            </h1>
-            <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mt-3">
-              {new Date(sessionData.created_at).toLocaleDateString("en-US", {
-                weekday: "long",
-                day: "numeric",
-                month: "long",
-              })}
-            </p>
-          </motion.div>
-        </div>
+      {/* --- HERO SECTION --- */}
+      <div className="p-6 pb-0 pt-12 text-center space-y-4 relative z-10">
+        <motion.div
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.6 }}
+        >
+          <div className="inline-flex items-center gap-2 bg-kubik-black text-white px-4 py-1.5 rounded-full text-[10px] font-bold tracking-[0.2em] uppercase mb-4 shadow-lg shadow-kubik-black/20">
+            <Camera size={12} /> Kubik Moment
+          </div>
+          <h1 className="text-4xl font-black text-kubik-black tracking-tight leading-tight">
+            Your <span className="text-kubik-blue">Photos</span>
+            <br />
+            Are Ready!
+          </h1>
+          <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mt-3">
+            {new Date(sessionData.created_at).toLocaleDateString("en-US", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+            })}
+          </p>
+        </motion.div>
+      </div>
 
+      <div className="max-w-md mx-auto relative flex flex-col">
         {/* --- MAIN CONTENT --- */}
-        <main className="flex-1 p-6 space-y-8 pb-32">
-          {/* FINAL PHOTO CARD */}
+        <main className="flex-1 p-6 space-y-8">
+          {/* FINAL PHOTO CARD (POLAROID STYLE) */}
           <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.2, duration: 0.5 }}
             className="relative group"
           >
-            {/* Photo Frame Effect */}
+            {/* KOTAK FOTO */}
             <div className="bg-white p-3 pb-16 rounded-sm shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] rotate-1 transition-transform duration-500 group-hover:rotate-0 border border-gray-100">
               {sessionData.final_photo_url ? (
+                // FIX WARNING: aspect-[2/3] -> aspect-2/3
                 <SmartImage
                   src={sessionData.final_photo_url}
                   alt="Final Print"
-                  aspectRatio="aspect-[2/3]" // Sesuaikan rasio kertas foto
+                  aspectRatio="aspect-2/3"
                   className="rounded-sm"
                 />
               ) : (
-                <div className="aspect-[2/3] bg-gray-100 flex items-center justify-center text-gray-300">
+                <div className="aspect-2/3 bg-gray-100 flex items-center justify-center text-gray-300">
                   No Image
                 </div>
               )}
 
-              {/* Watermark / Date on Paper */}
+              {/* Watermark */}
               <div className="absolute bottom-6 left-0 w-full text-center">
                 <p className="font-handwriting text-gray-400 text-sm transform -rotate-2">
                   #kubikmoments
@@ -234,32 +236,8 @@ export default function ClientDownload() {
               </div>
             </div>
 
-            {/* Action Buttons Floating */}
-            <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 flex gap-3 w-full max-w-[280px]">
-              {sessionData.final_photo_url && (
-                <button
-                  onClick={() =>
-                    handleDownload(
-                      sessionData.final_photo_url!,
-                      `kubik-${sessionData.session_uuid}-final.jpg`
-                    )
-                  }
-                  className="flex-1 bg-kubik-blue hover:bg-blue-700 text-white h-12 rounded-xl font-bold text-sm shadow-xl shadow-blue-500/30 flex items-center justify-center gap-2 transition-transform active:scale-95"
-                >
-                  <Download size={18} /> SAVE
-                </button>
-              )}
-              <button
-                onClick={handleShare}
-                className="w-12 h-12 bg-white text-kubik-black border border-gray-100 rounded-xl flex items-center justify-center shadow-lg hover:bg-gray-50 transition-transform active:scale-95"
-              >
-                {isCopied ? (
-                  <Check size={20} className="text-green-500" />
-                ) : (
-                  <Share2 size={20} />
-                )}
-              </button>
-            </div>
+            {/* --- FIX UI: TOMBOL DIHAPUS DARI SINI --- */}
+            {/* Kode lama (absolute -bottom-6) dihapus agar tidak error layout */}
           </motion.div>
 
           {/* RAW PHOTOS SECTION */}
@@ -287,10 +265,8 @@ export default function ClientDownload() {
                       <SmartImage
                         src={url}
                         alt={`Raw ${idx}`}
-                        aspectRatio="aspect-[4/5]"
+                        aspectRatio="aspect-4/5"
                       />
-
-                      {/* Overlay Download Button */}
                       <button
                         onClick={() =>
                           handleDownload(
@@ -300,7 +276,7 @@ export default function ClientDownload() {
                         }
                         className="absolute bottom-2 right-2 w-8 h-8 bg-white/90 backdrop-blur rounded-full flex items-center justify-center text-kubik-black shadow-sm opacity-0 group-hover:opacity-100 transition-opacity active:scale-90"
                       >
-                        <Download size={14} />
+                        <ArrowDownToLine size={14} />
                       </button>
                     </div>
                   </div>
@@ -309,21 +285,37 @@ export default function ClientDownload() {
             </motion.div>
           )}
         </main>
+      </div>
 
-        {/* --- FOOTER BRANDING --- */}
-        <footer className="text-center py-8 bg-gray-50 border-t border-gray-100">
-          <a href="#" className="inline-block mb-2">
-            <div className="w-8 h-8 bg-kubik-black rounded-lg flex items-center justify-center text-white mx-auto">
-              <Camera size={16} />
-            </div>
-          </a>
-          <p className="text-xs font-bold text-gray-900 tracking-wider">
-            KUBIK PHOTOBOOTH
-          </p>
-          <p className="text-[10px] text-gray-400 mt-1">
-            Capture your best moments.
-          </p>
-        </footer>
+      {/* --- FIX UI: TOMBOL PINDAH KE SINI (Sticky Bottom) --- */}
+      {/* Ini akan menjamin tombol berwarna BIRU dan selalu terlihat */}
+      <div className="fixed bottom-0 inset-x-0 bg-white/90 backdrop-blur-xl border-t border-gray-100 p-4 pb-8 z-50">
+        <div className="max-w-md mx-auto flex gap-3">
+          {/* Share Button */}
+          <button
+            onClick={handleShare}
+            className="h-14 w-14 flex items-center justify-center rounded-2xl bg-gray-50 border border-gray-200 text-kubik-black active:scale-95 transition-transform hover:bg-gray-100"
+          >
+            {isCopied ? (
+              <Check size={20} className="text-green-600" />
+            ) : (
+              <Share2 size={20} />
+            )}
+          </button>
+
+          {/* Download Button (Primary) - PASTI BIRU */}
+          {sessionData && sessionData.final_photo_url && (
+            <button
+              onClick={() =>
+                handleDownload(sessionData.final_photo_url!, "kubik-final.jpg")
+              }
+              className="flex-1 h-14 rounded-2xl bg-kubik-blue text-white font-bold text-base tracking-wide shadow-xl shadow-kubik-blue/30 flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-kubik-blueLight"
+            >
+              <Download size={20} />
+              <span>SAVE TO GALLERY</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

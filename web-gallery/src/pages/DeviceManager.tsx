@@ -496,7 +496,7 @@ export default function DeviceManager() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl shadow-slate-900/20 animate-in zoom-in-95 duration-200 border border-white/20 ring-1 ring-slate-900/5">
             <div className="text-center mb-8">
-              <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-500 rounded-2xl mx-auto flex items-center justify-center mb-4">
+              <div className="w-12 h-12 bg-linear-to-r from-blue-500 to-purple-500 rounded-2xl mx-auto flex items-center justify-center mb-4">
                 <User size={24} className="text-white" />
               </div>
               <h3 className="text-xl font-black text-slate-900">
@@ -643,7 +643,7 @@ export default function DeviceManager() {
                   <Button
                     type="submit"
                     disabled={isCreatingUser}
-                    className="flex-1 h-12 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold"
+                    className="flex-1 h-12 rounded-xl bg-linear-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold"
                   >
                     {isCreatingUser ? (
                       <Loader2 className="animate-spin" />
