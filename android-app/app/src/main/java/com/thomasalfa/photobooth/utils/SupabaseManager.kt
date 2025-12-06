@@ -5,7 +5,6 @@ import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
-import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.storage.Storage
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.Dispatchers
@@ -19,7 +18,17 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
 import kotlin.time.Duration.Companion.minutes
+import io.github.jan.supabase.realtime.Realtime
+import io.github.jan.supabase.realtime.PostgresAction
+import io.github.jan.supabase.realtime.postgresChangeFlow
+import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.postgrest.rpc
+import io.github.jan.supabase.realtime.channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 
 // --- MODEL DATA ---
 
@@ -73,6 +82,7 @@ object SupabaseManager {
         install(Storage) {
             transferTimeout = 5.minutes // Timeout lebih lama untuk bulk upload
         }
+        install(Realtime) // [NEW] Aktifkan Realtime
     }
 
     // --- 1. AUTHENTICATION ---
@@ -113,6 +123,70 @@ object SupabaseManager {
             } catch (e: Exception) {
                 Log.e("SUPABASE", "Redeem Failed: ${e.message}")
                 false
+            }
+        }
+    }
+    // --- 1.5 REALTIME STATUS MONITORING ---
+    suspend fun initializeRealtime() {
+        try {
+            client.realtime.connect()
+            Log.d("SUPABASE", "Realtime Connected")
+        } catch (e: Exception) {
+            Log.e("SUPABASE", "Realtime Connect Failed: ${e.message}")
+        }
+    }
+
+    suspend fun observeDeviceStatus(deviceId: String): Flow<String> {
+        return flow {
+            try {
+                // [BEST PRACTICE] Channel dengan timestamp untuk avoid conflict
+                val channelId = "device-$deviceId-${System.currentTimeMillis()}"
+                Log.d("SUPABASE", "🔧 Creating channel: $channelId")
+
+                val channel = client.realtime.channel(channelId)
+
+                // Setup listener SEBELUM subscribe
+                val changeFlow = channel.postgresChangeFlow<PostgresAction.Update>(schema = "public") {
+                    table = "devices"
+                }
+
+                // Subscribe
+                channel.subscribe(blockUntilSubscribed = true)
+                Log.d("SUPABASE", "✅ Channel subscribed successfully")
+
+                // Listen changes
+                changeFlow
+                    .filter { change ->
+                        val recordId = change.record["id"]?.toString()?.replace("\"", "") ?: ""
+                        Log.d("SUPABASE", "🔄 Update received for: $recordId")
+                        recordId == deviceId
+                    }
+                    .collect { change ->
+                        val status = change.record["status"]?.toString()?.replace("\"", "") ?: "UNKNOWN"
+                        Log.d("SUPABASE", "📡 Status changed → $status")
+                        emit(status)
+                    }
+
+            } catch (e: Exception) {
+                Log.e("SUPABASE", "💥 observeDeviceStatus error: ${e.message}", e)
+            }
+        }.flowOn(Dispatchers.IO)
+    }
+
+    // [FIX 3] Fetch dengan error handling lebih baik
+    suspend fun fetchSingleDeviceStatus(deviceId: String): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d("SUPABASE", "🔍 Fetching status for device: $deviceId")
+                val result = client.from("devices").select {
+                    filter { eq("id", deviceId) }
+                }.decodeSingleOrNull<DeviceTable>()
+
+                Log.d("SUPABASE", "📊 Device Status: ${result?.status}")
+                result?.status
+            } catch (e: Exception) {
+                Log.e("SUPABASE", "❌ Fetch Status Failed: ${e.message}")
+                null
             }
         }
     }
@@ -203,10 +277,5 @@ object SupabaseManager {
                 false
             }
         }
-    }
-
-    // Legacy support (biar ga error kalau masih ada yang panggil)
-    suspend fun updateSessionVideo(uuid: String, videoUrl: String) {
-        // Kosongkan atau implementasikan jika masih butuh video kedepannya
     }
 }

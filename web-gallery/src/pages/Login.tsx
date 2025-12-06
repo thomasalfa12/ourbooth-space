@@ -1,12 +1,20 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useNavigate } from "react-router-dom";
-import { Lock, Mail, Loader2 } from "lucide-react";
+import {
+  Mail,
+  Loader2,
+  Camera,
+  User,
+  KeyRound,
+  AlertCircle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function Login() {
   const navigate = useNavigate();
-  const [identifier, setIdentifier] = useState(""); // Changed from email to identifier to support both email and username
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -16,8 +24,11 @@ export default function Login() {
     setLoading(true);
     setErrorMsg(null);
 
+    // Simulasi delay sedikit agar animasi loading terasa (UX: Feedback)
+    // await new Promise(r => setTimeout(r, 800));
+
     try {
-      // 1. JIKA LOGIN PAKAI EMAIL (Bisa Admin, Bisa Cashier)
+      // 1. JIKA LOGIN PAKAI EMAIL
       if (identifier.includes("@")) {
         const { data: authData, error } =
           await supabase.auth.signInWithPassword({
@@ -28,21 +39,18 @@ export default function Login() {
         if (error) throw error;
 
         if (authData.session) {
-          // --- CEK ROLE & ASSIGNMENT ---
           const { data: profile } = await supabase
             .from("profiles")
             .select("role, assigned_device_id")
             .eq("id", authData.session.user.id)
             .single();
 
-          // A. JIKA ADMIN -> Ke Dashboard
           if (profile?.role === "ADMIN") {
             navigate("/admin");
-          }
-
-          // B. JIKA CASHIER -> Cek Device Link
-          else if (profile?.role === "CASHIER" && profile.assigned_device_id) {
-            // Ambil detail device yang terhubung
+          } else if (
+            profile?.role === "CASHIER" &&
+            profile.assigned_device_id
+          ) {
             const { data: deviceData } = await supabase
               .from("devices")
               .select("*")
@@ -50,26 +58,21 @@ export default function Login() {
               .single();
 
             if (deviceData) {
-              // SIMPAN SESSION DEVICE (SAMA SEPERTI LOGIN MANUAL)
-              // Ini triknya! Sistem Ticket Station akan membaca ini.
               localStorage.setItem(
                 "kubik_device_session",
                 JSON.stringify(deviceData)
               );
-
               navigate("/admin/tickets");
             } else {
-              setErrorMsg("Account is valid, but linked Device not found.");
+              setErrorMsg("Account valid, but no Device linked.");
             }
           } else {
-            // Cashier tapi belum dilink ke device manapun
             setErrorMsg("Your account is not assigned to any photobooth.");
           }
         }
       }
-      // 2. JIKA LOGIN PAKAI USERNAME/PIN (Device Login)
+      // 2. JIKA LOGIN PAKAI USERNAME (DEVICE)
       else {
-        // Cari device berdasarkan username
         const { data: deviceData, error: deviceError } = await supabase
           .from("devices")
           .select("*")
@@ -79,17 +82,14 @@ export default function Login() {
           .single();
 
         if (deviceError || !deviceData) {
-          setErrorMsg("Invalid device credentials or device is inactive");
+          setErrorMsg("Invalid credentials or device inactive.");
           return;
         }
 
-        // Simpan device session
         localStorage.setItem(
           "kubik_device_session",
           JSON.stringify(deviceData)
         );
-
-        // Redirect ke ticket station
         navigate("/admin/tickets");
       }
     } catch (err: unknown) {
@@ -101,71 +101,135 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 px-4">
-      <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-lg">
-        <div className="text-center mb-6">
-          <div className="mx-auto w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mb-2">
-            <Lock className="w-6 h-6 text-blue-600" />
-          </div>
-          <h1 className="text-2xl font-bold">Kubik Portal</h1>
-          <p className="text-sm text-gray-600 mt-1">Admin & Cashier Login</p>
-        </div>
+    <div className="min-h-screen w-full flex items-center justify-center bg-kubik-bg relative overflow-hidden font-sans text-kubik-black">
+      {/* --- BACKGROUND DECORATION --- */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div
+          className="absolute inset-0 opacity-[0.03]"
+          style={{
+            backgroundImage: "radial-gradient(#000 1px, transparent 1px)",
+            backgroundSize: "24px 24px",
+          }}
+        />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[500px] bg-kubik-blue/5 rounded-full blur-3xl" />
+      </div>
 
-        {errorMsg && (
-          <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded border border-red-100">
-            {errorMsg}
-          </div>
-        )}
-
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Email or Username
-            </label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                className="w-full pl-9 p-2 border rounded focus:outline-blue-500"
-                required
-                placeholder="email@example.com or booth_1234"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Password or PIN
-            </label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-9 p-2 border rounded focus:outline-blue-500"
-                required
-                placeholder="••••••••"
-              />
-            </div>
-          </div>
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? (
-              <Loader2 className="animate-spin mr-2 h-4 w-4" />
-            ) : (
-              "Sign In"
-            )}
-          </Button>
-        </form>
-
-        <div className="mt-6 text-center">
-          <p className="text-xs text-gray-500">
-            Admin: Use email & password • Cashier: Use email & password or
-            device credentials
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+        className="w-full max-w-[400px] px-6 relative z-10"
+      >
+        {/* --- HEADER --- */}
+        <div className="text-center mb-8 space-y-3">
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ delay: 0.1 }}
+            className="w-16 h-16 bg-linear-to-tr from-kubik-blue to-kubik-blueLight rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-kubik-blue/30 mb-6"
+          >
+            <Camera className="w-8 h-8 text-white" strokeWidth={2} />
+          </motion.div>
+          <h1 className="text-3xl font-bold tracking-tight text-kubik-black">
+            Welcome Back
+          </h1>
+          <p className="text-kubik-grey text-sm">
+            Enter your credentials to access the portal.
           </p>
         </div>
-      </div>
+
+        {/* --- FORM CARD --- */}
+        <div className="bg-white/80 backdrop-blur-xl border border-white/50 p-1 rounded-3xl shadow-2xl shadow-gray-200/50">
+          <div className="bg-white rounded-[20px] p-6 space-y-6 border border-gray-100">
+            {/* Error Message Animation */}
+            <AnimatePresence>
+              {errorMsg && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-xl text-xs font-medium text-red-600">
+                    <AlertCircle size={16} />
+                    {errorMsg}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              {/* INPUT 1: IDENTITY */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-kubik-black uppercase tracking-wider ml-1">
+                  Identity
+                </label>
+                <div className="group relative transition-all duration-300">
+                  <div className="absolute left-3 top-3 text-gray-400 group-focus-within:text-kubik-blue transition-colors">
+                    {identifier.includes("@") ? (
+                      <Mail size={18} />
+                    ) : (
+                      <User size={18} />
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-200 text-kubik-black text-sm rounded-xl py-3 pl-10 pr-4 outline-none focus:bg-white focus:border-kubik-blue focus:ring-4 focus:ring-kubik-blue/10 transition-all placeholder:text-gray-400"
+                    required
+                    placeholder="Email or Device ID"
+                  />
+                </div>
+              </div>
+
+              {/* INPUT 2: PASSWORD */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-kubik-black uppercase tracking-wider ml-1">
+                  Passcode
+                </label>
+                <div className="group relative transition-all duration-300">
+                  <div className="absolute left-3 top-3 text-gray-400 group-focus-within:text-kubik-blue transition-colors">
+                    <KeyRound size={18} />
+                  </div>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-200 text-kubik-black text-sm rounded-xl py-3 pl-10 pr-4 outline-none focus:bg-white focus:border-kubik-blue focus:ring-4 focus:ring-kubik-blue/10 transition-all placeholder:text-gray-400"
+                    required
+                    placeholder="Password or PIN"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full h-12 bg-kubik-blue hover:bg-kubik-blueLight text-white font-bold rounded-xl shadow-lg shadow-kubik-blue/20 transition-all active:scale-[0.98]"
+                >
+                  {loading ? (
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="animate-spin h-5 w-5" />
+                      <span>Verifying...</span>
+                    </div>
+                  ) : (
+                    "Sign In"
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        {/* --- FOOTER --- */}
+        <div className="mt-8 text-center space-y-2">
+          <p className="text-xs text-gray-400 font-medium">
+            Protected by Kubik Secure Access
+          </p>
+        </div>
+      </motion.div>
     </div>
   );
 }

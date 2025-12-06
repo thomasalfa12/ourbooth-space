@@ -12,7 +12,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -36,20 +38,24 @@ fun AdminScreen(
     onBack: () -> Unit,
     onManageFrames: () -> Unit,
     onOpenHistory: () -> Unit,
-    onExitKiosk: () -> Unit // <--- PARAMETER BARU UNTUK KIOSK
+    onExitKiosk: () -> Unit // Parameter Kiosk Mode
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settingsManager = remember { SettingsManager(context) }
     val db = remember { AppDatabase.getDatabase(context) }
 
-    // Setting States
+    // --- LOAD DEVICE INFO ---
+    val deviceName by settingsManager.deviceNameFlow.collectAsState(initial = "Loading...")
+    val deviceType by settingsManager.deviceTypeFlow.collectAsState(initial = "-")
+
+    // --- SETTING STATES ---
     var photoCount by remember { mutableIntStateOf(8) }
     var timerDuration by remember { mutableFloatStateOf(3f) }
     var captureMode by remember { mutableStateOf("AUTO") }
     var autoDelay by remember { mutableFloatStateOf(3f) }
 
-    // Active Event State
+    // --- ACTIVE EVENT STATE ---
     var activeEvent by remember { mutableStateOf("ALL") }
     val allFrames by db.frameDao().getAllFrames().collectAsState(initial = emptyList())
 
@@ -59,7 +65,7 @@ fun AdminScreen(
     }
     var isEventDropdownExpanded by remember { mutableStateOf(false) }
 
-    // Load Data
+    // --- LOAD DATA ---
     LaunchedEffect(Unit) {
         settingsManager.photoCountFlow.collect { photoCount = it }
     }
@@ -88,8 +94,44 @@ fun AdminScreen(
                 Text("SYSTEM CONTROL", style = MaterialTheme.typography.headlineMedium, color = KubikBlack, fontWeight = FontWeight.Black)
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
+            // --- [NEW] DEVICE INFO CARD ---
+            Card(
+                colors = CardDefaults.cardColors(containerColor = KubikBlue),
+                elevation = CardDefaults.cardElevation(8.dp),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth(0.9f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(20.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("DEVICE IDENTITY", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha=0.7f))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(deviceName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(color = Color.White.copy(alpha=0.2f), shape = RoundedCornerShape(4.dp)) {
+                                Text(deviceType, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(horizontal=6.dp, vertical=2.dp))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(Icons.Default.CheckCircle, null, tint = KubikSuccess, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Online & Active", fontSize = 12.sp, color = Color.White)
+                        }
+                    }
+
+                    // Icon Info Kecil
+                    Icon(Icons.Default.Info, null, tint = Color.White.copy(alpha=0.5f))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // --- SETTINGS CARD ---
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(4.dp),
@@ -261,7 +303,6 @@ fun AdminScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             // --- TOMBOL EXIT KIOSK / MAINTENANCE ---
-            // Tombol ini akan membuka kunci layar (munculkan navigasi Android)
             Button(
                 onClick = { onExitKiosk() },
                 colors = ButtonDefaults.buttonColors(containerColor = KubikError.copy(alpha = 0.9f)),

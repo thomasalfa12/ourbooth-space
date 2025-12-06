@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -49,6 +50,7 @@ import com.thomasalfa.photobooth.utils.SupabaseManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -58,6 +60,11 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         hideSystemUI()
+
+        // Init Realtime Connection
+        lifecycleScope.launch(Dispatchers.IO) {
+            SupabaseManager.initializeRealtime()
+        }
 
         setContent {
             KubikTheme {
@@ -78,6 +85,8 @@ class MainActivity : ComponentActivity() {
                         isDeviceLoggedIn = loggedIn
                     }
                 }
+                
+
 
                 // --- APP STATES ---
                 var currentScreen by remember { mutableStateOf("LOADING") }
@@ -90,6 +99,54 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                LaunchedEffect(isDeviceLoggedIn, deviceId) {
+                    val safeDeviceId = deviceId?.takeIf { it.isNotBlank() }
+
+                    if (isDeviceLoggedIn != true || safeDeviceId == null) {
+                        Log.d("MAIN", "⚠️ Monitoring skipped")
+                        return@LaunchedEffect
+                    }
+
+                    Log.d("MAIN", "🚀 Starting Monitoring: $safeDeviceId")
+
+                    try {
+                        // 1. Initial Check
+                        val currentStatus = SupabaseManager.fetchSingleDeviceStatus(safeDeviceId)
+                        Log.d("MAIN", "🔐 Initial Status: $currentStatus")
+
+                        if (currentStatus != "ACTIVE") {
+                            Log.w("MAIN", "🚨 Device not active: $currentStatus")
+                            settingsManager.logout()
+                            currentScreen = "LOGIN"
+                            return@LaunchedEffect
+                        }
+
+                        // 2. Realtime Monitoring
+                        Log.d("MAIN", "👂 Listening to status changes...")
+
+                        SupabaseManager.observeDeviceStatus(safeDeviceId).collect { status ->
+                            Log.d("MAIN", "📩 Status update: $status")
+
+                            if (status != "ACTIVE") {
+                                Log.e("MAIN", "🔴 KILL SWITCH ACTIVATED: $status")
+
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(
+                                        context,
+                                        "Device has been ${status.lowercase()} by admin",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+
+                                settingsManager.logout()
+                                currentScreen = "LOGIN"
+                            }
+                        }
+
+                    } catch (e: Exception) {
+                        Log.e("MAIN", "❌ Monitoring error: ${e.message}", e)
+                    }
+                }
                 // --- SETTINGS COLLECTION ---
                 val activeEvent by settingsManager.activeEventFlow.collectAsState(initial = "ALL")
                 val correctPin by settingsManager.adminPinFlow.collectAsState(initial = "1234")

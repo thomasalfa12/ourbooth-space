@@ -18,7 +18,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function fetchUserContext() {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
         if (!user) {
           setRole(null);
           setAssignedDevice(null);
@@ -42,7 +44,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               .select("*")
               .eq("id", profile.assigned_device_id)
               .single();
-            
+
             if (device) setAssignedDevice(device as Device);
           }
         }
@@ -56,8 +58,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     fetchUserContext();
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
         setLoading(true);
         fetchUserContext();
       }

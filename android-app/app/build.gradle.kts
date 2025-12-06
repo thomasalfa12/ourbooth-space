@@ -123,6 +123,7 @@ dependencies {
     // Modul (Perhatikan akhiran -kt)
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
     implementation("io.github.jan-tennert.supabase:storage-kt")
+    implementation("io.github.jan-tennert.supabase:realtime-kt")
 
     // Serializer (Wajib untuk Supabase)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
